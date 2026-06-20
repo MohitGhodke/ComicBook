@@ -1,0 +1,364 @@
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:         #ffffff;
+  --accent:     #c4956a;
+  --text-muted: #b0a396;
+}
+
+html, body {
+  height: 100%;
+  font-family: Georgia, 'Times New Roman', serif;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+
+/* ════════════════════════════════════════
+   LOGO — behind the book on the left half
+════════════════════════════════════════ */
+.logo-backdrop {
+  position: fixed;
+  top: 0; left: 0;
+  width: 50%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.logo {
+  max-width: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+}
+
+
+/* ════════════════════════════════════════
+   BOOK SCENE — full viewport, spine centred
+════════════════════════════════════════ */
+.book-scene {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  z-index: 1;
+  pointer-events: none;
+}
+
+#book,
+.book-nav {
+  pointer-events: auto;
+}
+
+
+/* ── Page images — contain keeps aspect ratio, no stretch ── */
+.page {
+  background: #fff;
+}
+
+.page img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+
+/* ════════════════════════════════════════
+   NAV
+════════════════════════════════════════ */
+.book-nav {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1.6rem;
+  flex-shrink: 0;
+}
+
+/* ── Button click bounce ── */
+@keyframes btn-pop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(0.82); }
+  65%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+.nav-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.nav-btn:hover   { background: var(--accent); color: #fff; }
+.nav-btn:disabled { opacity: 0.25; cursor: default; }
+.nav-btn:disabled:hover { background: transparent; color: var(--accent); }
+
+.nav-btn.popped  { animation: btn-pop 0.22s ease forwards; }
+
+/* Close button gets a slightly warmer tint to signal destructive-ish action */
+.nav-btn--close {
+  font-size: 0.9rem;
+}
+
+/* ── Page-info as a clickable jump trigger ── */
+.page-info-btn {
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  min-width: 56px;
+  text-align: center;
+  font-family: -apple-system, system-ui, sans-serif;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease;
+  position: relative;
+}
+
+.page-info-btn::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -2px;
+  width: 0;
+  height: 1.5px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  transition: width 0.2s ease;
+}
+
+.page-info-btn:hover { color: var(--accent); }
+.page-info-btn:hover::after { width: 80%; }
+.page-info-btn.open { color: var(--accent); }
+.page-info-btn.open::after { width: 80%; }
+
+/* ── Jump-to-page popover ── */
+@keyframes panel-up {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.jump-panel {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.97);
+  border: 1.5px solid var(--accent);
+  border-radius: 14px;
+  padding: 12px 16px 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.13);
+  white-space: nowrap;
+  z-index: 20;
+  display: none;
+}
+
+.jump-panel.open {
+  display: block;
+  animation: panel-up 0.2s ease forwards;
+}
+
+/* small arrow pointing down at the page-info button */
+.jump-panel::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid var(--accent);
+}
+
+.jump-label {
+  display: block;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 10px;
+  font-family: -apple-system, system-ui, sans-serif;
+  text-transform: uppercase;
+}
+
+.jump-dots {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-width: 340px;
+  justify-content: center;
+}
+
+.jump-dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.72rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
+  font-family: -apple-system, system-ui, sans-serif;
+}
+
+.jump-dot:hover  { background: var(--accent); color: #fff; transform: scale(1.15); }
+.jump-dot.active { background: var(--accent); color: #fff; }
+.jump-dot.popped { animation: btn-pop 0.22s ease forwards; }
+
+
+/* ════════════════════════════════════════
+   STORYTELLER MODE
+════════════════════════════════════════ */
+
+/* Ensure the nav always floats above the overlay/lens */
+.book-nav {
+  position: relative;
+  z-index: 10;
+}
+
+/* ── Toggle button ── */
+.storyteller-btn {
+  margin-left: 0.5rem;
+}
+
+.storyteller-btn.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(196, 149, 106, 0.5);
+}
+
+/* ── Input blocker: sits above #book, intercepts StPageFlip mouse events ── */
+.storyteller-blocker {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+body.storyteller-active .storyteller-blocker {
+  pointer-events: auto;
+}
+
+/* ── Dark cinematic overlay ── */
+.storyteller-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  background: rgba(0, 0, 0, 0.38);
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.storyteller-overlay.active {
+  opacity: 1;
+}
+
+/* ── Magnifier lens ── */
+@keyframes lens-breathe {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px rgba(210, 160, 60, 0.35),
+      0 0 0 4px rgba(255, 215, 120, 0.12),
+      0 0 30px 8px rgba(200, 140, 40, 0.12),
+      0 10px 50px rgba(0, 0, 0, 0.7);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(255, 200, 80, 0.6),
+      0 0 0 5px rgba(255, 215, 120, 0.18),
+      0 0 40px 12px rgba(200, 140, 40, 0.22),
+      0 10px 50px rgba(0, 0, 0, 0.7);
+  }
+}
+
+.storyteller-lens {
+  position: fixed;
+  left: var(--cx, 50%);
+  top: var(--cy, 50%);
+  width: 550px;
+  height: 550px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  background: #111;
+  /* Warm amber ring that pulses via lens-breathe */
+  box-shadow:
+    0 0 0 2px rgba(210, 160, 60, 0.35),
+    0 10px 50px rgba(0, 0, 0, 0.7);
+}
+
+.storyteller-lens.active {
+  opacity: 1;
+  animation: lens-breathe 3s ease-in-out infinite;
+}
+
+.storyteller-lens-img {
+  position: absolute;
+  display: block;
+  /* width / height / left / top set dynamically by JS */
+  /* Crisp, vivid look inside the lens */
+  filter: contrast(1.12) saturate(1.2) brightness(1.05);
+  image-rendering: auto;
+}
+
+/* Glass lens surface — convex highlight top-left, soft shadow bottom-right */
+.storyteller-lens::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    radial-gradient(
+      circle at 32% 28%,
+      rgba(255, 255, 255, 0.10) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      circle at 68% 72%,
+      rgba(0, 0, 0, 0.10) 0%,
+      transparent 50%
+    );
+}
+
+/* ── Hide native cursor over the book while lens is active ── */
+body.storyteller-active .book-scene {
+  cursor: none;
+}
+body.storyteller-active .book-nav {
+  cursor: auto;
+}
+body.storyteller-active .book-nav button {
+  cursor: pointer;
+}

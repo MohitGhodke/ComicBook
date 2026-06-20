@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ComicBook</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- Logo sits on the left half; the opening page unfolds over it -->
+  <div class="logo-backdrop">
+    <img src="images/logo.jpg" alt="Logo" class="logo" />
+  </div>
+
+  <!-- Book centred in full viewport, spine at horizontal centre -->
+  <div class="book-scene">
+    <div id="book">
+      <div class="page page-cover">
+        <img src="images/cover.png" alt="Cover" />
+      </div>
+
+      <div class="page"><img src="images/page-01.png" alt="Page 1" /></div>
+      <div class="page"><img src="images/page-02.png" alt="Page 2" /></div>
+      <div class="page"><img src="images/page-03.png" alt="Page 3" /></div>
+      <div class="page"><img src="images/page-04.png" alt="Page 4" /></div>
+      <div class="page"><img src="images/page-05.png" alt="Page 5" /></div>
+      <div class="page"><img src="images/page-06.png" alt="Page 6" /></div>
+      <div class="page"><img src="images/page-07.png" alt="Page 7" /></div>
+      <div class="page"><img src="images/page-08.png" alt="Page 8" /></div>
+
+      <div class="page page-cover page-back">
+        <img src="images/back-cover.jpg" alt="Back Cover" />
+      </div>
+    </div>
+
+    <!-- Storyteller mode: blocks StPageFlip mouse events, then overlay + lens -->
+    <div id="storytellerBlocker" class="storyteller-blocker"></div>
+    <div id="storytellerOverlay" class="storyteller-overlay"></div>
+    <div id="storytellerLens" class="storyteller-lens" aria-hidden="true">
+      <img id="storytellerLensImg" class="storyteller-lens-img" alt="" />
+    </div>
+
+    <nav class="book-nav">
+      <button id="closeBtn" class="nav-btn nav-btn--close" aria-label="Close book" title="Close book">&#10005;</button>
+      <button id="prevBtn" class="nav-btn" aria-label="Previous page">&#8592;</button>
+      <button id="pageInfo" class="page-info-btn" aria-label="Jump to page" title="Jump to page">1 / 1</button>
+      <button id="nextBtn" class="nav-btn" aria-label="Next page">&#8594;</button>
+
+      <div id="jumpPanel" class="jump-panel" aria-hidden="true">
+        <span class="jump-label">Jump to page</span>
+        <div id="jumpDots" class="jump-dots"></div>
+      </div>
+
+      <button id="storytellerBtn" class="nav-btn storyteller-btn" aria-label="Toggle storyteller mode" title="Storyteller mode">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <circle cx="6.5" cy="6.5" r="4"/>
+          <line x1="9.5" y1="9.5" x2="14" y2="14" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </nav>
+  </div>
+
+  <script src="lib/page-flip.browser.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
