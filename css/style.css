@@ -352,9 +352,9 @@ body.storyteller-active .storyteller-blocker {
     );
 }
 
-/* ── Hide nav entirely in storyteller mode ── */
+/* ── Hide nav in storyteller mode (visibility keeps layout space so book doesn't jump) ── */
 body.storyteller-active .book-nav {
-  display: none;
+  visibility: hidden;
 }
 
 /* ── Hide native cursor over the book while lens is active ── */
