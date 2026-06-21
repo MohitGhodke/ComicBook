@@ -352,13 +352,39 @@ body.storyteller-active .storyteller-blocker {
     );
 }
 
+/* ── Hide nav entirely in storyteller mode ── */
+body.storyteller-active .book-nav {
+  display: none;
+}
+
 /* ── Hide native cursor over the book while lens is active ── */
 body.storyteller-active .book-scene {
   cursor: none;
 }
-body.storyteller-active .book-nav {
-  cursor: auto;
+
+/* ── "Click anywhere to exit" hint ── */
+.storyteller-hint {
+  position: absolute;
+  bottom: 2rem;
+  left: 0;
+  right: 0;
+  text-align: center;
+  pointer-events: none;
+  z-index: 8;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  font-family: -apple-system, system-ui, sans-serif;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  color: #111;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 7px 20px;
+  border-radius: 999px;
+  width: fit-content;
+  margin: 0 auto;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
 }
-body.storyteller-active .book-nav button {
-  cursor: pointer;
+
+body.storyteller-active .storyteller-hint {
+  opacity: 1;
 }

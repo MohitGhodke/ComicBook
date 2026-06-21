@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ComicBook</title>
+  <title>Edlevo-ComicBook</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
@@ -30,19 +30,24 @@
       <div class="page"><img src="images/page-08.png" alt="Page 8" /></div>
 
       <div class="page page-cover page-back">
-        <img src="images/back-cover.jpg" alt="Back Cover" />
+        <img src="images/back-cover.png" alt="Back Cover" />
       </div>
     </div>
 
     <!-- Storyteller mode: blocks StPageFlip mouse events, then overlay + lens -->
     <div id="storytellerBlocker" class="storyteller-blocker"></div>
+    <div class="storyteller-hint" aria-live="polite">Click anywhere to exit storyteller mode</div>
     <div id="storytellerOverlay" class="storyteller-overlay"></div>
     <div id="storytellerLens" class="storyteller-lens" aria-hidden="true">
       <img id="storytellerLensImg" class="storyteller-lens-img" alt="" />
     </div>
 
     <nav class="book-nav">
-      <button id="closeBtn" class="nav-btn nav-btn--close" aria-label="Close book" title="Close book">&#10005;</button>
+      <button id="closeBtn" class="nav-btn nav-btn--close" aria-label="Close book" title="Close book">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 7L8 2L14 7V14H10V10H6V14H2V7Z"/>
+        </svg>
+      </button>
       <button id="prevBtn" class="nav-btn" aria-label="Previous page">&#8592;</button>
       <button id="pageInfo" class="page-info-btn" aria-label="Jump to page" title="Jump to page">1 / 1</button>
       <button id="nextBtn" class="nav-btn" aria-label="Next page">&#8594;</button>

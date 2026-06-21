@@ -135,6 +135,7 @@
   function toggleStoryteller() {
     storytellerActive = !storytellerActive;
     if (storytellerActive) {
+      closeJumpPanel();
       document.body.classList.add('storyteller-active');
       storytellerBtn.classList.add('active');
       storytellerOverlay.classList.add('active');
