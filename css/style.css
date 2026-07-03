@@ -2,9 +2,10 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:         #ffffff;
-  --accent:     #c4956a;
-  --text-muted: #b0a396;
+  --bg:           #ffffff;
+  --accent:       #c4956a;
+  --text-muted:   #b0a396;
+  --page-border:  5px;   /* thickness of the black frame overlaid on each page */
 }
 
 html, body {
@@ -12,6 +13,77 @@ html, body {
   font-family: Georgia, 'Times New Roman', serif;
   background: var(--bg);
   overflow: hidden;
+}
+
+
+/* ════════════════════════════════════════
+   LOADING OVERLAY
+   Loader adapted from Uiverse.io by vinodjangid07
+   (classes namespaced + recolored to match theme)
+════════════════════════════════════════ */
+.book-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.4rem;
+  background: var(--bg);
+  transition: opacity 0.5s ease;
+}
+
+.book-loader.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.book-loader-label {
+  font-family: -apple-system, system-ui, sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.loader {
+  width: fit-content;
+  height: fit-content;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  --book-color: var(--accent);
+  --book-cover-color: #8a6240;
+}
+
+.loader-book {
+  width: 150px;
+  height: 13px;
+  background-color: var(--book-color);
+  border-bottom: 2px solid var(--book-cover-color);
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  position: relative;
+}
+
+.loader-page {
+  width: 50%;
+  height: 2px;
+  background-color: var(--book-color);
+  animation: loader-paging 0.7s ease-out infinite;
+  transform-origin: left;
+}
+
+.loader-page2 {
+  animation-duration: 0.8s;
+  position: absolute;
+}
+
+@keyframes loader-paging {
+  10%  { transform: rotateZ(0deg); }
+  100% { transform: rotateZ(-180deg); }
 }
 
 
@@ -62,6 +134,7 @@ html, body {
 /* ── Page images — contain keeps aspect ratio, no stretch ── */
 .page {
   background: #fff;
+  position: relative;        /* containing block for the gutter / sheen layers */
 }
 
 .page img {
@@ -71,6 +144,98 @@ html, body {
   display: block;
   user-select: none;
   -webkit-user-drag: none;
+}
+
+
+/* ════════════════════════════════════════
+   REAL-BOOK FEEL
+   1. A consistent thick black frame overlaid on every page — normalizes the
+      uneven/missing borders baked into the artwork. Where two pages meet at
+      the spine, their inner frames stack into one clean divider line.
+   2. A light binding gutter shadow, darkest at the spine and fading outward.
+   3. A soft drop shadow that lifts the whole book off the white backdrop.
+   Both layers ride above the artwork; StPageFlip's own flip shadows draw at a
+   much higher z-index, so flipping still looks right.
+════════════════════════════════════════ */
+
+.page::before,
+.page::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ::before = consistent black border framing the page */
+.page::before {
+  border: var(--page-border) solid #000;
+  z-index: 4;
+}
+
+/* At the spine, each page's inner border is widened a touch and pushed to
+   OVERSHOOT the seam, so the two borders overlap across the sub-pixel gap
+   between the page elements — no white hairline can show through. The pseudo
+   is offset outward by the same amount it's widened, so the combined divider
+   still spans one --page-border width, matching the outer borders. */
+.page.--left::before {
+  right: calc(var(--page-border) * -0.5);
+  border-right-width: calc(var(--page-border) * 0.75);
+}
+.page.--right::before {
+  left: calc(var(--page-border) * -0.5);
+  border-left-width: calc(var(--page-border) * 0.75);
+}
+
+/* ::after = binding gutter shadow, drawn only along the spine edge.
+   Kept light and narrow so it reads as a fold, not a smudge. */
+.page::after {
+  z-index: 3;
+}
+
+/* Left (verso) page → spine is on its RIGHT edge */
+.page.--left::after {
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0)        90%,
+    rgba(0, 0, 0, 0.07)     96%,
+    rgba(0, 0, 0, 0.20)    100%
+  );
+}
+
+/* Right (recto) page → spine is on its LEFT edge */
+.page.--right::after {
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0)        90%,
+    rgba(0, 0, 0, 0.07)     96%,
+    rgba(0, 0, 0, 0.20)    100%
+  );
+}
+
+/* Hard covers get a slightly stronger spine shadow so the binding reads as
+   thicker board stock rather than a thin paper leaf. */
+.page-cover.--left::after {
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0)        88%,
+    rgba(0, 0, 0, 0.10)     95%,
+    rgba(0, 0, 0, 0.28)    100%
+  );
+}
+
+.page-cover.--right::after {
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0)        88%,
+    rgba(0, 0, 0, 0.10)     95%,
+    rgba(0, 0, 0, 0.28)    100%
+  );
+}
+
+/* Lift the whole book off the flat white background. drop-shadow follows the
+   real rendered page shapes, so a mid-flip page casts a believable shadow. */
+#book {
+  filter: drop-shadow(0 14px 26px rgba(60, 40, 20, 0.22));
 }
 
 

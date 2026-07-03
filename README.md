@@ -138,10 +138,19 @@ IIS runs under the **IIS_IUSRS** identity, which must be able to read the files.
 
 The included `web.config` handles:
 - Correct MIME types for `.js`, `.css`, `.png`, `.jpg`, `.svg`, `.woff`, `.woff2`
-- `Cache-Control` and `X-Content-Type-Options` response headers
+- **Caching policy** (see below) and the `X-Content-Type-Options` response header
 - `index.html` as the default document
 
 IIS reads this file automatically — no manual MIME-type configuration is needed in IIS Manager.
+
+#### Caching policy (important for redeploys)
+
+The `web.config` sets caching per path:
+
+- **`index.html`, `css/`, `js/`** → `Cache-Control: no-cache` (`<clientCache cacheControlMode="DisableCache" />`). The browser revalidates these with the server on every load, so a new deploy takes effect immediately.
+- **`images/`** → cached for one day (`<clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="1.00:00:00" />`), because the comic art is large and rarely changes.
+
+> ⚠️ Do **not** put a blanket long-lived `Cache-Control: max-age=...` header on the whole site. An earlier version did this, which caused redeploys not to show up: browsers kept serving the old `style.css` and `main.js` for a day, so the loading overlay rendered unstyled (plain "Loading…" text in the corner) and was never hidden, while the rest of the site stayed on the old version.
 
 ---
 
@@ -164,7 +173,17 @@ You should see the comic open with the cover sweep animation.
 | JS or CSS returns 404 | MIME types not registered | Confirm `web.config` is in the site root |
 | Images missing | Wrong physical path | Verify the path in IIS Manager matches the folder |
 | Port already in use | Another site on the same port | Change the binding port in Step 3A |
-| Changes not reflected | Browser cache | Hard-refresh with `Ctrl + Shift + R` |
+| Changes not reflected after deploy | Stale browser cache from an over-aggressive `Cache-Control` header | Ensure `web.config` uses the per-path `<clientCache>` policy above (no blanket `max-age` on HTML/JS/CSS). Then hard-refresh once with `Ctrl + Shift + R` |
+| "Loading…" text stuck in a corner, book never appears | Browser is running the **old** cached `main.js`/`style.css` against the **new** `index.html`, so the loader is never styled or hidden | Same fix as above — correct the caching policy and hard-refresh. The loader self-clears within 10 s only when the current `main.js` is being served |
+| New comic page doesn't show | `images/` is cached for a day | Replace the file **and rename it** (update the `<img src>` in `index.html`), or hard-refresh |
+
+---
+
+### Redeploying an update
+
+1. Copy the changed files over the existing ones in `C:\inetpub\wwwroot\ComicBook\` (you do **not** need to recreate the site or recycle the app pool for a static-file change).
+2. With the caching policy above in place, `index.html`, the CSS, and the JS revalidate on the next load, so the update appears immediately.
+3. If you changed any file under `images/`, give it a new filename (and update `index.html`) or do a one-time hard-refresh (`Ctrl + Shift + R`) to bypass the 1-day image cache.
 
 ---
 

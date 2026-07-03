@@ -29,6 +29,19 @@
   var isFirstLoad = true;
   var openTimer   = null;
 
+  var bookLoader  = document.getElementById('bookLoader');
+
+  // Fade out the loading overlay, then remove it from the DOM.
+  function hideLoader() {
+    if (!bookLoader) return;
+    var el = bookLoader;
+    bookLoader = null;
+    el.classList.add('hidden');
+    setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, 600); // slightly longer than the 0.5s CSS fade
+  }
+
   // Snapshot of page data taken BEFORE StPageFlip touches the DOM.
   // We rebuild from this on every reinit so StPageFlip always gets fresh elements.
   var pageSnapshot = [];
@@ -306,21 +319,44 @@
       if (storytellerActive) updateMagnifier(e.clientX, e.clientY);
     });
 
-    // Detect real page dimensions from page-01.png, then boot
-    var probe = new Image();
+    // Preload every comic image, then init the book and reveal it. This keeps
+    // the loader on screen until the pages are actually decoded, so the book
+    // appears fully rendered rather than flashing in blank.
+    var srcs = pageSnapshot
+      .map(function (p) { return p.src; })
+      .filter(Boolean);
 
-    probe.onload = function () {
-      pageRatio = probe.naturalHeight / probe.naturalWidth;
+    var booted = false;
+    function boot() {
+      if (booted) return;
+      booted = true;
       initPageFlip(0);
-    };
+      hideLoader();
+    }
 
-    probe.onerror = function () {
-      // image missing or wrong name — fall back to standard ratio
-      initPageFlip(0);
-    };
+    if (srcs.length === 0) {
+      boot();
+    } else {
+      var remaining = srcs.length;
+      srcs.forEach(function (src) {
+        var img = new Image();
+        img.onload = function () {
+          // Use the first interior page to detect the true aspect ratio
+          if (/page-01\.png(\?|$)/.test(src)) {
+            pageRatio = img.naturalHeight / img.naturalWidth;
+          }
+          if (--remaining <= 0) boot();
+        };
+        img.onerror = function () {
+          // missing/renamed image — just don't let it block booting
+          if (--remaining <= 0) boot();
+        };
+        img.src = src;
+      });
 
-    // Point at the first interior page image to get the true aspect ratio
-    probe.src = 'images/page-01.png';
+      // Safety net: never trap the user behind the loader if an image stalls
+      setTimeout(boot, 10000);
+    }
 
     // Resize: destroy + reinit at new size, preserving current page
     var resizeTimer;
