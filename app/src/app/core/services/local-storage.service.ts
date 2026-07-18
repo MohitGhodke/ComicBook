@@ -81,4 +81,16 @@ export class LocalStorageService extends StorageService {
     this.urlCache.set(ref.key, url);
     return url;
   }
+
+  async deleteImage(ref: ImageRef): Promise<void> {
+    // Only local blobs are owned by this store; asset/azure refs are external.
+    if (ref.kind !== 'local') return;
+    const cached = this.urlCache.get(ref.key);
+    if (cached) {
+      URL.revokeObjectURL(cached);
+      this.urlCache.delete(ref.key);
+    }
+    const db = await this.db();
+    await db.delete(IMAGES, ref.key);
+  }
 }

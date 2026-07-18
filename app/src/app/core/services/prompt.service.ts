@@ -1,11 +1,14 @@
 import { Injectable } from '@angular/core';
 import { Character, Chapter, ComicBook, Page } from '../models/comic.model';
+import { styleBlock } from '../style/art-style';
 
 /**
  * Builds a static, copy-paste image-generation prompt from the story inputs.
  *
  * This is deliberately a pure, deterministic string builder for v1 (no AI). The
  * same seam can later delegate to an AI image API — the callers won't change.
+ * Every prompt ends with the shared style bible ({@link styleBlock}) so all
+ * pages across all books share one aspect ratio and look.
  */
 @Injectable({ providedIn: 'root' })
 export class PromptService {
@@ -15,26 +18,27 @@ export class PromptService {
     page: Pick<Page, 'caption' | 'dialogue'>,
   ): string {
     const lines: string[] = [];
-    lines.push('Comic book panel, clean line art, consistent character design, dynamic composition.');
+    lines.push('A single full-page comic book illustration.');
 
     if (book.idea?.trim()) {
-      lines.push(`Theme: ${book.idea.trim()}`);
+      lines.push(`Story theme: ${book.idea.trim()}`);
     }
 
     const cast = this.describeCast(book.characters);
-    if (cast) lines.push(`Characters: ${cast}`);
+    if (cast) lines.push(`Characters (keep their look identical on every page): ${cast}`);
 
     if (chapter.synopsis?.trim()) {
       lines.push(`Scene: ${chapter.synopsis.trim()}`);
     }
     if (page.caption?.trim()) {
-      lines.push(`Moment: ${page.caption.trim()}`);
+      lines.push(`This page depicts: ${page.caption.trim()}`);
     }
     if (page.dialogue?.trim()) {
-      lines.push(`Dialogue in a speech bubble: "${page.dialogue.trim()}"`);
+      lines.push(`Include a hand-lettered speech bubble reading: "${page.dialogue.trim()}"`);
     }
 
-    lines.push('Portrait orientation, single panel, no watermark, no page numbers.');
+    lines.push('');
+    lines.push(styleBlock());
     return lines.join('\n');
   }
 

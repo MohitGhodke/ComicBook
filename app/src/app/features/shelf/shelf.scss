@@ -67,20 +67,9 @@
   padding: 0.2rem 0.5rem;
   border-radius: 999px;
 }
-.del {
-  position: absolute;
-  top: 0.5rem; right: 0.5rem;
-  width: 1.7rem; height: 1.7rem;
-  border-radius: 50%;
-  border: none;
-  background: rgba(35, 32, 27, 0.55);
-  color: #fff;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.14s ease, background 0.14s ease;
-}
-.tile:hover .del { opacity: 1; }
-.del:hover { background: var(--accent); }
+.tile-actions { display: flex; gap: 0.45rem; margin-top: 0.6rem; }
+.tile-btn { font-size: 0.82rem; padding: 0.38rem 0.75rem; }
+.tile-btn.danger:hover { color: var(--accent); border-color: #e2b3a6; }
 
 .meta { padding: 0.7rem 0.15rem 0; }
 .title { font-size: 1.05rem; line-height: 1.25; }

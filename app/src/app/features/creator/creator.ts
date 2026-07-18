@@ -1,10 +1,12 @@
-import { Component, inject, signal, computed, OnInit } from '@angular/core';
+import { Component, inject, signal, computed, WritableSignal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { Reader } from '../reader/reader';
 import { ComicLibraryService } from '../../core/services/comic-library.service';
 import { StorageService } from '../../core/services/storage.service';
 import { PromptService } from '../../core/services/prompt.service';
+import { ComicAssistant, StoryContext, SuggestedCharacter, SuggestedPage } from '../../core/services/ai/comic-assistant';
+import { AiConfig } from '../../core/services/ai/ai.config';
 import { ComicBook, Character, Chapter, Page, ReaderPage } from '../../core/models/comic.model';
 import { newId } from '../../core/util/id';
 import { Draft, loadDraft, saveDraft, clearDraft, emptyDraft } from './draft';
@@ -29,6 +31,8 @@ export class Creator implements OnInit {
   private library = inject(ComicLibraryService);
   private storage = inject(StorageService);
   private prompts = inject(PromptService);
+  private assistant = inject(ComicAssistant);
+  private aiConfig = inject(AiConfig);
 
   readonly steps: StepDef[] = [
     { key: 'idea', label: 'Idea', title: 'What is your comic about?',
@@ -59,6 +63,30 @@ export class Creator implements OnInit {
   readonly publishing = signal(false);
   readonly copiedPageId = signal<string | null>(null);
 
+  // On-device AI assist
+  readonly aiAvailable = signal(false);
+  readonly aiModels = signal<string[]>([]);
+  readonly aiError = signal<string | null>(null);
+  private aiAbort: AbortController | null = null;
+
+  // Per-step AI state
+  readonly ideaLoading = signal(false);
+  readonly ideaSuggestion = signal<string | null>(null);
+
+  readonly charLoading = signal(false);
+  readonly charSuggestions = signal<SuggestedCharacter[] | null>(null);
+
+  readonly beatsLoading = signal(false);
+  readonly beatsSuggestion = signal<string | null>(null);
+
+  readonly storyLoading = signal(false);
+  readonly storySuggestions = signal<SuggestedPage[] | null>(null);
+  storyboardCount = 6;
+
+  readonly coverLoading = signal(false);
+  readonly coverPromptText = signal<string | null>(null);
+  readonly coverCopied = signal(false);
+
   readonly current = computed(() => this.steps[this.step()]);
   readonly isLast = computed(() => this.step() === this.steps.length - 1);
   readonly isFirst = computed(() => this.step() === 0);
@@ -67,7 +95,150 @@ export class Creator implements OnInit {
     this.draft = loadDraft();
     await this.refreshThumbs();
     this.userBooks.set(await this.library.getUserBooks());
+    this.probeAi();
   }
+
+  // ── On-device AI ───────────────────────────────────────────────────────────
+  get aiModel(): string {
+    return this.aiConfig.model;
+  }
+  set aiModel(v: string) {
+    this.aiConfig.model = v;
+  }
+
+  private async probeAi() {
+    try {
+      const models = await this.assistant.listModels();
+      this.aiModels.set(models);
+      this.aiAvailable.set(models.length > 0);
+      if (!this.aiConfig.model && models[0]) this.aiConfig.model = models[0];
+    } catch {
+      this.aiAvailable.set(false);
+    }
+  }
+
+  /** The story so far, fed into every AI task so the steps stay connected. */
+  private storyContext(): StoryContext {
+    return {
+      idea: this.draft.idea,
+      characters: this.draft.characters.map((c) => ({ name: c.name, appearance: c.appearance, traits: c.traits })),
+      synopsis: this.draft.synopsis,
+    };
+  }
+
+  /** Run an AI task with shared loading/error/abort handling. */
+  private async run<T>(loading: WritableSignal<boolean>, fn: (signal: AbortSignal) => Promise<T>): Promise<T | null> {
+    if (loading()) return null;
+    this.aiError.set(null);
+    loading.set(true);
+    this.aiAbort = new AbortController();
+    try {
+      return await fn(this.aiAbort.signal);
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return null;
+      this.aiError.set(
+        e instanceof TypeError
+          ? 'Could not reach the local model. Is your server running?'
+          : e?.message || 'Something went wrong talking to the model.',
+      );
+      return null;
+    } finally {
+      loading.set(false);
+      this.aiAbort = null;
+    }
+  }
+
+  cancelAi() {
+    this.aiAbort?.abort();
+  }
+
+  // Step 1 — Idea
+  async shapeIdea() {
+    if (!this.draft.idea.trim()) return;
+    this.ideaSuggestion.set(null);
+    const shaped = await this.run(this.ideaLoading, (s) => this.assistant.shapeIdea(this.draft.idea, s));
+    if (shaped !== null) this.ideaSuggestion.set(shaped || '(the model returned nothing — try again)');
+  }
+  acceptIdea() {
+    const s = this.ideaSuggestion();
+    if (s) { this.draft.idea = s; this.persist(); }
+    this.ideaSuggestion.set(null);
+  }
+  dismissIdea() { this.ideaSuggestion.set(null); }
+
+  // Step 2 — Characters
+  async suggestCharacters() {
+    if (!this.draft.idea.trim()) return;
+    this.charSuggestions.set(null);
+    const list = await this.run(this.charLoading, (s) => this.assistant.suggestCharacters(this.storyContext(), s));
+    if (list !== null) this.charSuggestions.set(list);
+  }
+  addSuggestedCharacter(c: SuggestedCharacter) {
+    this.draft.characters.push({ id: newId('char'), name: c.name, appearance: c.appearance, traits: c.traits });
+    this.charSuggestions.update((list) => (list ? list.filter((x) => x !== c) : list));
+    this.persist();
+  }
+  addAllCharacters() {
+    for (const c of this.charSuggestions() ?? []) {
+      this.draft.characters.push({ id: newId('char'), name: c.name, appearance: c.appearance, traits: c.traits });
+    }
+    this.charSuggestions.set(null);
+    this.persist();
+  }
+  dismissCharacters() { this.charSuggestions.set(null); }
+
+  // Step 3 — Interactions
+  async draftInteractions() {
+    this.beatsSuggestion.set(null);
+    const beats = await this.run(this.beatsLoading, (s) => this.assistant.draftInteractions(this.storyContext(), s));
+    if (beats !== null) this.beatsSuggestion.set(beats || '(the model returned nothing — try again)');
+  }
+  acceptBeats() {
+    const s = this.beatsSuggestion();
+    if (s) { this.draft.synopsis = s; this.persist(); }
+    this.beatsSuggestion.set(null);
+  }
+  dismissBeats() { this.beatsSuggestion.set(null); }
+
+  // Step 4 — Pages (storyboard)
+  async storyboard() {
+    this.storySuggestions.set(null);
+    const count = Math.min(Math.max(this.storyboardCount || 6, 1), 12);
+    const pages = await this.run(this.storyLoading, (s) => this.assistant.storyboardPages(this.storyContext(), count, s));
+    if (pages !== null) this.storySuggestions.set(pages);
+  }
+  addStoryboardPages() {
+    for (const p of this.storySuggestions() ?? []) {
+      this.draft.pages.push({ id: newId('page'), caption: p.caption, dialogue: p.dialogue });
+    }
+    this.storySuggestions.set(null);
+    this.persist();
+  }
+  dismissStoryboard() { this.storySuggestions.set(null); }
+
+  // Step 5 — Cover image prompt
+  async generateCoverPrompt() {
+    if (!this.draft.idea.trim()) return;
+    this.coverCopied.set(false);
+    this.coverPromptText.set(null);
+    const prompt = await this.run(this.coverLoading, (s) =>
+      this.assistant.coverPrompt(this.storyContext(), this.draft.title, 'front', s),
+    );
+    if (prompt !== null) {
+      this.coverPromptText.set(prompt || '(the model returned nothing — try again)');
+      this.copyCoverPrompt();
+    }
+  }
+  async copyCoverPrompt() {
+    const text = this.coverPromptText();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.coverCopied.set(true);
+      setTimeout(() => this.coverCopied.set(false), 1800);
+    } catch { /* clipboard blocked — text is still shown for manual copy */ }
+  }
+  dismissCoverPrompt() { this.coverPromptText.set(null); }
 
   // ── Draft persistence ──────────────────────────────────────────────────────
   persist() {

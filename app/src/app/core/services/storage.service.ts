@@ -19,4 +19,7 @@ export abstract class StorageService {
 
   /** Turn an ImageRef into a URL usable directly in an <img src>. */
   abstract resolveUrl(ref: ImageRef): Promise<string>;
+
+  /** Remove a stored image. No-op for refs this store doesn't own (asset/azure). */
+  abstract deleteImage(ref: ImageRef): Promise<void>;
 }

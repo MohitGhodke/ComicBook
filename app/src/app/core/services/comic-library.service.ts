@@ -35,8 +35,28 @@ export class ComicLibraryService {
     await this.storage.saveBook(book);
   }
 
+  /** Delete a book and clean up every image blob it owns. Seeds are protected. */
   async delete(id: string): Promise<void> {
+    const book = await this.storage.getBook(id);
+    if (book) {
+      for (const ref of this.imageRefs(book)) {
+        await this.storage.deleteImage(ref);
+      }
+    }
     await this.storage.deleteBook(id);
+  }
+
+  /** Every image reference a book holds (cover, back cover, and all pages). */
+  private imageRefs(book: ComicBook) {
+    const refs = [];
+    if (book.coverImageRef) refs.push(book.coverImageRef);
+    if (book.backCoverImageRef) refs.push(book.backCoverImageRef);
+    for (const chapter of book.chapters) {
+      for (const page of chapter.pages) {
+        if (page.imageRef) refs.push(page.imageRef);
+      }
+    }
+    return refs;
   }
 
   /** Count of renderable interior pages (excludes covers). */

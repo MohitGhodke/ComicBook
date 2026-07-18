@@ -14,6 +14,10 @@ export const routes: Routes = [
     loadComponent: () => import('./features/creator/creator').then((m) => m.Creator),
   },
   {
+    path: 'edit/:id',
+    loadComponent: () => import('./features/editor/book-editor').then((m) => m.BookEditor),
+  },
+  {
     path: 'create/:draftId',
     loadComponent: () => import('./features/creator/creator').then((m) => m.Creator),
   },

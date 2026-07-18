@@ -53,6 +53,11 @@ export class Shelf implements OnInit {
     this.router.navigate(['/create']);
   }
 
+  edit(event: Event, book: ComicBook) {
+    event.stopPropagation();
+    this.router.navigate(['/edit', book.id]);
+  }
+
   async remove(event: Event, book: ComicBook) {
     event.stopPropagation();
     if (!confirm(`Delete "${book.title}"? This can't be undone.`)) return;

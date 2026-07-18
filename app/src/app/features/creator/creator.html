@@ -34,12 +34,53 @@
             <input class="input" [(ngModel)]="draft.title" (ngModelChange)="persist()"
                    placeholder="e.g. The Last Lighthouse" />
           </label>
-          <label class="field">
-            <span class="field-label">The big idea</span>
+          <div class="field">
+            <div class="field-label-row">
+              <span class="field-label">The big idea</span>
+              <div class="ai-controls">
+                @if (aiAvailable()) {
+                  @if (aiModels().length > 1) {
+                    <select class="ai-model" [(ngModel)]="aiModel" title="On-device model">
+                      @for (m of aiModels(); track m) { <option [value]="m">{{ m }}</option> }
+                    </select>
+                  }
+                  @if (ideaLoading()) {
+                    <button class="btn small ai-btn" (click)="cancelAi()">Cancel</button>
+                  } @else {
+                    <button class="btn small ai-btn" (click)="shapeIdea()" [disabled]="!draft.idea.trim()"
+                            title="Shape this into a comic-ready logline using your local model">
+                      ✨ Help me shape this
+                    </button>
+                  }
+                } @else {
+                  <span class="ai-off faint" title="Start a local model server to enable AI assist">● AI offline</span>
+                }
+              </div>
+            </div>
             <textarea class="textarea" [(ngModel)]="draft.idea" (ngModelChange)="persist()"
                       placeholder="What is this comic really about? What should a reader feel or learn?"></textarea>
             <span class="hint faint">Tip: one clear sentence beats a vague paragraph.</span>
-          </label>
+
+            @if (ideaLoading()) {
+              <div class="ai-card ai-thinking">
+                <span class="ai-spinner"></span> Shaping your idea on-device…
+              </div>
+            }
+            @if (aiError()) {
+              <div class="ai-card ai-error">{{ aiError() }}</div>
+            }
+            @if (ideaSuggestion()) {
+              <div class="ai-card ai-suggestion">
+                <span class="ai-eyebrow">✨ Suggested logline</span>
+                <p class="ai-text">{{ ideaSuggestion() }}</p>
+                <div class="ai-actions">
+                  <button class="btn btn--primary small" (click)="acceptIdea()">Use this</button>
+                  <button class="btn btn--ghost small" (click)="shapeIdea()">Try again</button>
+                  <button class="btn btn--ghost small" (click)="dismissIdea()">Dismiss</button>
+                </div>
+              </div>
+            }
+          </div>
           <label class="field">
             <span class="field-label">Author <span class="faint">(optional)</span></span>
             <input class="input" [(ngModel)]="draft.author" (ngModelChange)="persist()" placeholder="Your name" />
@@ -48,6 +89,44 @@
 
         <!-- 2. CHARACTERS -->
         @case ('characters') {
+          <div class="ai-bar">
+            @if (aiAvailable()) {
+              @if (charLoading()) {
+                <span class="ai-inline"><span class="ai-spinner"></span> Imagining your cast on-device…</span>
+                <button class="btn small btn--ghost" (click)="cancelAi()">Cancel</button>
+              } @else {
+                <button class="btn small ai-btn" (click)="suggestCharacters()" [disabled]="!draft.idea.trim()"
+                        title="Infer the characters from your big idea">✨ Suggest characters from your idea</button>
+                @if (!draft.idea.trim()) { <span class="faint hint">Write your big idea first.</span> }
+              }
+            } @else { <span class="ai-off faint">● AI offline</span> }
+          </div>
+          @if (aiError()) { <div class="ai-card ai-error">{{ aiError() }}</div> }
+          @if (charSuggestions()) {
+            <div class="ai-card ai-suggestion">
+              <div class="ai-sugg-head">
+                <span class="ai-eyebrow">✨ Suggested characters</span>
+                <div class="ai-actions">
+                  <button class="btn small btn--primary" (click)="addAllCharacters()" [disabled]="!charSuggestions()?.length">Add all</button>
+                  <button class="btn small btn--ghost" (click)="dismissCharacters()">Dismiss</button>
+                </div>
+              </div>
+              @if (!charSuggestions()?.length) {
+                <p class="faint">The model didn't return usable characters — try again.</p>
+              }
+              @for (c of charSuggestions(); track $index) {
+                <div class="sugg-char">
+                  <div class="sugg-char-main">
+                    <strong>{{ c.name }}</strong>
+                    @if (c.appearance) { <span class="faint">{{ c.appearance }}</span> }
+                    @if (c.traits) { <span class="faint">{{ c.traits }}</span> }
+                  </div>
+                  <button class="btn small" (click)="addSuggestedCharacter(c)">Add</button>
+                </div>
+              }
+            </div>
+          }
+
           @if (draft.characters.length === 0) {
             <p class="empty faint">No characters yet. Add the people (or creatures) your story revolves around.</p>
           }
@@ -78,12 +157,40 @@
 
         <!-- 3. INTERACTIONS -->
         @case ('interactions') {
-          <label class="field">
-            <span class="field-label">Scene beats</span>
+          <div class="field">
+            <div class="field-label-row">
+              <span class="field-label">Scene beats</span>
+              <div class="ai-controls">
+                @if (aiAvailable()) {
+                  @if (beatsLoading()) {
+                    <button class="btn small ai-btn" (click)="cancelAi()">Cancel</button>
+                  } @else {
+                    <button class="btn small ai-btn" (click)="draftInteractions()" [disabled]="!draft.idea.trim()"
+                            title="Draft the beats from your idea and characters">✨ Draft the scene beats</button>
+                  }
+                } @else { <span class="ai-off faint">● AI offline</span> }
+              </div>
+            </div>
             <textarea class="textarea tall" [(ngModel)]="draft.synopsis" (ngModelChange)="persist()"
                       placeholder="Walk through what happens: how the characters meet, what they want, where they clash, how it turns out…"></textarea>
             <span class="hint faint">This becomes the chapter's storyline and feeds the image prompts.</span>
-          </label>
+
+            @if (beatsLoading()) {
+              <div class="ai-card ai-thinking"><span class="ai-spinner"></span> Drafting the beats on-device…</div>
+            }
+            @if (aiError()) { <div class="ai-card ai-error">{{ aiError() }}</div> }
+            @if (beatsSuggestion()) {
+              <div class="ai-card ai-suggestion">
+                <span class="ai-eyebrow">✨ Suggested beats</span>
+                <p class="ai-text ai-pre">{{ beatsSuggestion() }}</p>
+                <div class="ai-actions">
+                  <button class="btn btn--primary small" (click)="acceptBeats()">Use this</button>
+                  <button class="btn btn--ghost small" (click)="draftInteractions()">Try again</button>
+                  <button class="btn btn--ghost small" (click)="dismissBeats()">Dismiss</button>
+                </div>
+              </div>
+            }
+          </div>
           @if (draft.characters.length) {
             <div class="cast-reminder">
               <span class="faint">Your cast:</span>
@@ -96,6 +203,47 @@
 
         <!-- 4. PAGES -->
         @case ('pages') {
+          <div class="ai-bar">
+            @if (aiAvailable()) {
+              @if (storyLoading()) {
+                <span class="ai-inline"><span class="ai-spinner"></span> Storyboarding your pages on-device…</span>
+                <button class="btn small btn--ghost" (click)="cancelAi()">Cancel</button>
+              } @else {
+                <button class="btn small ai-btn" (click)="storyboard()" [disabled]="!draft.idea.trim()"
+                        title="Turn your idea, characters and beats into a page-by-page storyboard">✨ Storyboard</button>
+                <label class="story-count faint">pages
+                  <input class="input tiny" type="number" min="1" max="12" [(ngModel)]="storyboardCount" />
+                </label>
+                @if (!draft.idea.trim()) { <span class="faint hint">Write your big idea first.</span> }
+              }
+            } @else { <span class="ai-off faint">● AI offline</span> }
+          </div>
+          @if (aiError()) { <div class="ai-card ai-error">{{ aiError() }}</div> }
+          @if (storySuggestions()) {
+            <div class="ai-card ai-suggestion">
+              <div class="ai-sugg-head">
+                <span class="ai-eyebrow">✨ Suggested storyboard — {{ storySuggestions()?.length }} page(s)</span>
+                <div class="ai-actions">
+                  <button class="btn small btn--primary" (click)="addStoryboardPages()" [disabled]="!storySuggestions()?.length">Add these pages</button>
+                  <button class="btn small btn--ghost" (click)="dismissStoryboard()">Dismiss</button>
+                </div>
+              </div>
+              @if (!storySuggestions()?.length) {
+                <p class="faint">The model didn't return usable pages — try again.</p>
+              }
+              @for (p of storySuggestions(); track $index) {
+                <div class="sugg-page">
+                  <span class="sugg-page-n">{{ $index + 1 }}</span>
+                  <div class="sugg-page-body">
+                    @if (p.caption) { <span class="sugg-cap">{{ p.caption }}</span> }
+                    @if (p.dialogue) { <span class="sugg-dlg faint">“{{ p.dialogue }}”</span> }
+                  </div>
+                </div>
+              }
+              <p class="hint faint">You'll add artwork to each page below (upload or copy an image prompt).</p>
+            </div>
+          }
+
           @if (draft.pages.length === 0) {
             <p class="empty faint">No pages yet. Add your first page to start building the comic.</p>
           }
@@ -159,8 +307,20 @@
           </div>
 
           @if (assembleMode() === 'new') {
-            <label class="field cover-field">
-              <span class="field-label">Cover image <span class="faint">(optional — first page is used if empty)</span></span>
+            <div class="field cover-field">
+              <div class="field-label-row">
+                <span class="field-label">Cover image <span class="faint">(optional — first page is used if empty)</span></span>
+                <div class="ai-controls">
+                  @if (aiAvailable()) {
+                    @if (coverLoading()) {
+                      <button class="btn small ai-btn" (click)="cancelAi()">Cancel</button>
+                    } @else {
+                      <button class="btn small ai-btn" (click)="generateCoverPrompt()" [disabled]="!draft.idea.trim()"
+                              title="Write an image prompt for the cover from your whole story">✨ Cover image prompt</button>
+                    }
+                  }
+                </div>
+              </div>
               <div class="cover-row">
                 @if (coverThumb) { <img class="cover-thumb" [src]="coverThumb" alt="Cover" /> }
                 <label class="btn small upload">
@@ -168,7 +328,23 @@
                   <input type="file" accept="image/*" (change)="onCoverImage($event)" hidden />
                 </label>
               </div>
-            </label>
+
+              @if (coverLoading()) {
+                <div class="ai-card ai-thinking"><span class="ai-spinner"></span> Art-directing your cover on-device…</div>
+              }
+              @if (coverPromptText()) {
+                <div class="ai-card ai-suggestion">
+                  <span class="ai-eyebrow">✨ Cover image prompt</span>
+                  <p class="ai-text ai-pre">{{ coverPromptText() }}</p>
+                  <div class="ai-actions">
+                    <button class="btn btn--primary small" (click)="copyCoverPrompt()">{{ coverCopied() ? 'Copied ✓' : 'Copy prompt' }}</button>
+                    <button class="btn btn--ghost small" (click)="generateCoverPrompt()">Try again</button>
+                    <button class="btn btn--ghost small" (click)="dismissCoverPrompt()">Dismiss</button>
+                  </div>
+                  <p class="hint faint">Paste this into your image tool, then upload the result as the cover.</p>
+                </div>
+              }
+            </div>
           } @else {
             <label class="field">
               <span class="field-label">Choose a book</span>

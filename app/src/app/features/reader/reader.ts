@@ -161,6 +161,9 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
     this.pages.forEach((p) => {
       const div = document.createElement('div');
       div.className = 'page' + (p.isCover ? ' page-cover' : '') + (p.isBack ? ' page-back' : '');
+      // Covers are rigid boards (hard); interior leaves fold (soft). Hard pages
+      // don't reveal a blank back when turned. StPageFlip reads data-density.
+      div.dataset['density'] = p.isCover ? 'hard' : 'soft';
       const img = document.createElement('img');
       img.src = p.src;
       img.alt = p.alt;

@@ -29,17 +29,19 @@
             } @else {
               <div class="cover-empty faint">No cover yet</div>
             }
-            @if (item.editable) {
-              <button class="del" title="Delete comic" (click)="remove($event, item.book)">✕</button>
-            } @else {
-              <span class="badge">Sample</span>
-            }
+            @if (!item.editable) { <span class="badge">Sample</span> }
           </div>
           <div class="meta">
             <h3 class="title">{{ item.book.title }}</h3>
             <p class="muted sub">
               {{ item.book.author || 'Unknown author' }} · {{ item.pages }} page{{ item.pages === 1 ? '' : 's' }}
             </p>
+            @if (item.editable) {
+              <div class="tile-actions">
+                <button class="btn tile-btn" (click)="edit($event, item.book)">✎ Edit</button>
+                <button class="btn btn--ghost tile-btn danger" (click)="remove($event, item.book)">Delete</button>
+              </div>
+            }
           </div>
         </article>
       }

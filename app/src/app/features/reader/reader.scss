@@ -21,7 +21,13 @@
 .book-scene .book-host,
 .book-scene .book-nav { pointer-events: auto; }
 
-.book-scene #book { filter: drop-shadow(0 14px 26px rgba(60, 40, 20, 0.22)); }
+/* Lift the book off the backdrop with a box-shadow — NOT filter: drop-shadow.
+   A `filter` on this element (StPageFlip's .stf__parent) forces the whole 3D
+   subtree to render flattened, which breaks the page fold (flat "reflection"
+   artifact + blank adjacent page during a drag). box-shadow paints without
+   flattening descendants, so the 3D flip stays intact. StPageFlip's own
+   drawShadow handles the per-page shadow during a flip. */
+.book-scene #book { box-shadow: 0 16px 34px rgba(60, 40, 20, 0.26); }
 
 /* ── Loader ── */
 .book-scene .book-loader {
