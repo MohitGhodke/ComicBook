@@ -1,0 +1,44 @@
+:host { display: block; }
+
+.settings {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2.6rem 2rem 4rem;
+}
+
+.settings-head { margin-bottom: 2rem; }
+.back {
+  display: inline-block; margin-bottom: 1rem;
+  color: var(--ink-soft); text-decoration: none; font-size: 0.9rem;
+}
+.back:hover { color: var(--ink); }
+.settings-head h1 { font-size: 1.9rem; margin: 0 0 0.3rem; }
+.muted { color: var(--ink-soft); }
+.sub { margin: 0.2rem 0 1rem; line-height: 1.55; max-width: 60ch; }
+
+.block { padding: 1.6rem 0; border-top: 1px solid var(--line); }
+.block:first-of-type { border-top: none; padding-top: 0; }
+.block h2 { font-size: 1.05rem; margin: 0 0 0.2rem; }
+
+/* Style options — a clean radio list, no boxes */
+.style-list { list-style: none; margin: 0.4rem 0 0; padding: 0; display: flex; flex-direction: column; }
+.style-opt {
+  display: flex; align-items: flex-start; gap: 0.8rem;
+  padding: 0.85rem 0.6rem; cursor: pointer; border-radius: var(--radius-sm);
+  border-left: 2px solid transparent;
+}
+.style-opt:hover { background: var(--paper-2); }
+.style-opt.selected { border-left-color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
+.radio {
+  flex: 0 0 auto; width: 1.05rem; height: 1.05rem; margin-top: 0.15rem;
+  border-radius: 50%; border: 1.5px solid var(--line-2); background: var(--card);
+}
+.radio.on { border-color: var(--accent); border-width: 5px; }
+.style-body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.style-label { font-family: var(--font-display); font-weight: 600; }
+.style-desc { font-size: 0.88rem; line-height: 1.45; }
+
+.field { display: flex; flex-direction: column; gap: 0.4rem; }
+.field-label { font-size: 0.85rem; font-weight: 600; color: var(--ink-soft); }
+.row { display: flex; gap: 0.5rem; align-items: center; }
+.row .input { flex: 1; }

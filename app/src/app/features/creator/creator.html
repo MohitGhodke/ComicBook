@@ -18,13 +18,14 @@
 
   <!-- Step body -->
   <main class="panel">
-    <header class="panel-head">
-      <span class="eyebrow">Step {{ step() + 1 }} of {{ steps.length }}</span>
-      <h1>{{ current().title }}</h1>
-      <p class="teach">{{ current().teach }}</p>
-    </header>
+    <div class="panel-scroll">
+      <header class="panel-head">
+        <span class="eyebrow">{{ isEditing() ? 'Editing' : 'New comic' }} · Step {{ step() + 1 }} of {{ steps.length }}</span>
+        <h1>{{ current().title }}</h1>
+        <p class="teach">{{ current().teach }}</p>
+      </header>
 
-    <section class="panel-body">
+      <section class="panel-body">
       @switch (current().key) {
 
         <!-- 1. IDEA (the starting point) -->
@@ -91,6 +92,13 @@
             <span class="field-label">Author <span class="faint">(optional)</span></span>
             <input class="input" [(ngModel)]="draft.author" (ngModelChange)="persist()" placeholder="Your name" />
           </label>
+          <label class="field">
+            <span class="field-label">Art style <span class="faint">— every image prompt adapts to this</span></span>
+            <select class="input" [(ngModel)]="draft.styleId" (ngModelChange)="persist()">
+              @for (s of artStyles; track s.id) { <option [value]="s.id">{{ s.label }}</option> }
+            </select>
+            <span class="hint faint">Set the default for new comics in <a routerLink="/settings">Settings</a>.</span>
+          </label>
         }
 
         <!-- 2. CHARACTERS -->
@@ -139,29 +147,57 @@
           @if (draft.characters.length === 0) {
             <p class="empty faint">No characters yet. Add the people (or creatures) your story revolves around.</p>
           }
-          @for (c of draft.characters; track c.id; let i = $index) {
-            <div class="card char-card">
-              <div class="card-head">
-                <span class="card-idx">Character {{ i + 1 }}</span>
-                <button class="btn btn--ghost small" (click)="removeCharacter(c)">Remove</button>
+          <div class="char-grid">
+            @for (c of draft.characters; track c.id; let i = $index) {
+              <div class="char-card">
+                <div class="card-head">
+                  <span class="card-idx">Character {{ i + 1 }}</span>
+                  <button class="btn btn--ghost small" (click)="removeCharacter(c)">Remove</button>
+                </div>
+                <label class="field">
+                  <span class="field-label">Name</span>
+                  <input class="input" [(ngModel)]="c.name" (ngModelChange)="persist()" placeholder="e.g. Mira" />
+                </label>
+                <label class="field">
+                  <span class="field-label">Appearance</span>
+                  <textarea class="textarea" [(ngModel)]="c.appearance" (ngModelChange)="persist()"
+                            placeholder="What do they look like? Age, clothing, distinctive features…"></textarea>
+                </label>
+                <label class="field">
+                  <span class="field-label">Traits</span>
+                  <textarea class="textarea" [(ngModel)]="c.traits" (ngModelChange)="persist()"
+                            placeholder="Personality, role, what drives them…"></textarea>
+                </label>
+
+                <div class="char-ref">
+                  <div class="char-ref-thumb">
+                    @if (thumbs()[c.id]) {
+                      <img [src]="thumbs()[c.id]" alt="Reference art" />
+                    } @else {
+                      <div class="art-empty faint">Reference</div>
+                    }
+                  </div>
+                  <div class="char-ref-side">
+                    <span class="field-label">Reference art <span class="faint">— locks their look in every panel</span></span>
+                    <div class="char-ref-actions">
+                      <label class="btn small upload">
+                        {{ thumbs()[c.id] ? 'Replace' : 'Upload' }}
+                        <input type="file" accept="image/*" (change)="onCharacterReference($event, c)" hidden />
+                      </label>
+                      <button class="btn small" (click)="copyCharacterPrompt(c)" [disabled]="!c.appearance.trim()">
+                        {{ copiedCharId() === c.id ? 'Copied ✓' : 'Copy portrait prompt' }}
+                      </button>
+                      @if (thumbs()[c.id]) {
+                        <button class="btn small btn--ghost" (click)="removeCharacterReference(c)">Remove</button>
+                      }
+                    </div>
+                  </div>
+                </div>
               </div>
-              <label class="field">
-                <span class="field-label">Name</span>
-                <input class="input" [(ngModel)]="c.name" (ngModelChange)="persist()" placeholder="e.g. Mira" />
-              </label>
-              <label class="field">
-                <span class="field-label">Appearance</span>
-                <textarea class="textarea" [(ngModel)]="c.appearance" (ngModelChange)="persist()"
-                          placeholder="What do they look like? Age, clothing, distinctive features…"></textarea>
-              </label>
-              <label class="field">
-                <span class="field-label">Traits</span>
-                <textarea class="textarea" [(ngModel)]="c.traits" (ngModelChange)="persist()"
-                          placeholder="Personality, role, what drives them…"></textarea>
-              </label>
-            </div>
-          }
+            }
+          </div>
           <button class="btn add-btn" (click)="addCharacter()">+ Add a character</button>
+          <p class="hint faint">Generate each character's reference once (Copy portrait prompt → your image tool → Upload the result). Every panel prompt then points back to it so faces stay consistent.</p>
         }
 
         <!-- 3. INTERACTIONS -->
@@ -236,155 +272,186 @@
               <div class="ai-sugg-head">
                 <span class="ai-eyebrow">✨ Suggested storyboard — {{ storySuggestions()?.length }} page(s)</span>
                 <div class="ai-actions">
-                  <button class="btn small btn--primary" (click)="addStoryboardPages()" [disabled]="!storySuggestions()?.length">Add these pages</button>
-                  <button class="btn small btn--ghost" (click)="dismissStoryboard()">Dismiss</button>
+                  <button class="btn small btn--primary" (click)="addStoryboardPages()"
+                          [disabled]="!storySuggestions()?.length || storyLoading()">
+                    {{ storyLoading() ? 'Generating…' : 'Add these pages' }}
+                  </button>
+                  <button class="btn small btn--ghost" (click)="dismissStoryboard()" [disabled]="storyLoading()">Dismiss</button>
                 </div>
               </div>
-              @if (!storySuggestions()?.length) {
+              @if (storyLoading()) {
+                <p class="hint faint">Wait for all pages to finish before adding them.</p>
+              } @else if (!storySuggestions()?.length) {
                 <p class="faint">The model didn't return usable pages — try again.</p>
               }
               @for (p of storySuggestions(); track $index) {
                 <div class="sugg-page">
                   <span class="sugg-page-n">{{ $index + 1 }}</span>
                   <div class="sugg-page-body">
-                    @if (p.caption) { <span class="sugg-cap">{{ p.caption }}</span> }
-                    @if (p.dialogue) { <span class="sugg-dlg faint">“{{ p.dialogue }}”</span> }
+                    <span class="faint">{{ p.layout }} · {{ p.panels.length }} panel(s)</span>
+                    @for (pl of p.panels; track $index) {
+                      <span class="sugg-cap">• {{ pl.description }}@if (pl.dialogue) { <span class="sugg-dlg faint"> — “{{ pl.dialogue }}”</span> }</span>
+                    }
                   </div>
                 </div>
               }
-              <p class="hint faint">You'll add artwork to each page below (upload or copy an image prompt).</p>
+              @if (!storyLoading()) {
+                <p class="hint faint">Each page becomes a framed panel layout — you add artwork to each panel below.</p>
+              }
             </div>
           }
 
           @if (draft.pages.length === 0) {
-            <p class="empty faint">No pages yet. Add your first page to start building the comic.</p>
-          }
-          @for (p of draft.pages; track p.id; let i = $index) {
-            <div class="card page-card">
-              <div class="card-head">
-                <span class="card-idx">Page {{ i + 1 }}</span>
-                <div class="page-actions">
-                  <button class="btn btn--ghost small" (click)="movePage(p, -1)" [disabled]="i === 0" title="Move up">↑</button>
-                  <button class="btn btn--ghost small" (click)="movePage(p, 1)" [disabled]="i === draft.pages.length - 1" title="Move down">↓</button>
-                  <button class="btn btn--ghost small" (click)="removePage(p)">Remove</button>
-                </div>
-              </div>
-              <div class="page-grid">
-                <div class="page-art">
-                  @if (thumbs()[p.id]) {
-                    <img [src]="thumbs()[p.id]" alt="Page art" />
-                  } @else {
-                    <div class="art-empty faint">No image yet</div>
-                  }
-                  <div class="art-actions">
-                    <label class="btn small upload">
-                      {{ thumbs()[p.id] ? 'Replace image' : 'Upload image' }}
-                      <input type="file" accept="image/*" (change)="onPageImage($event, p)" hidden />
-                    </label>
-                    <button class="btn small" (click)="copyPrompt(p)">
-                      {{ copiedPageId() === p.id ? 'Copied ✓' : 'Copy image prompt' }}
-                    </button>
-                  </div>
-                </div>
-                <div class="page-text">
-                  <label class="field">
-                    <span class="field-label">Caption</span>
-                    <input class="input" [(ngModel)]="p.caption" (ngModelChange)="persist()" placeholder="Narration for this panel" />
-                  </label>
-                  <label class="field">
-                    <span class="field-label">Dialogue</span>
-                    <textarea class="textarea" [(ngModel)]="p.dialogue" (ngModelChange)="persist()" placeholder="What is said in this panel?"></textarea>
-                  </label>
-                </div>
-              </div>
-            </div>
-          }
-          <button class="btn add-btn" (click)="addPage()">+ Add a page</button>
-        }
-
-        <!-- 5. ASSEMBLE -->
-        @case ('assemble') {
-          <div class="mode-choice">
-            <button class="mode-card" [class.selected]="assembleMode() === 'new'" (click)="onModeChange('new')">
-              <span class="mode-title">Start a new book</span>
-              <span class="faint">Create a fresh comic on your shelf.</span>
-            </button>
-            <button class="mode-card" [class.selected]="assembleMode() === 'existing'"
-                    (click)="onModeChange('existing')" [disabled]="userBooks().length === 0">
-              <span class="mode-title">Add as a chapter</span>
-              <span class="faint">
-                {{ userBooks().length ? 'Append this to a book you already made.' : 'You have no books yet.' }}
-              </span>
-            </button>
-          </div>
-
-          @if (assembleMode() === 'new') {
-            <div class="field cover-field">
-              <div class="field-label-row">
-                <span class="field-label">Cover image <span class="faint">(optional — first page is used if empty)</span></span>
-                <div class="ai-controls">
-                  @if (aiAvailable()) {
-                    @if (coverLoading()) {
-                      <button class="btn small ai-btn" (click)="cancelAi()">Cancel</button>
-                    } @else {
-                      <button class="btn small ai-btn" (click)="generateCoverPrompt()" [disabled]="!draft.idea.trim()"
-                              title="Write an image prompt for the cover from your whole story">✨ Cover image prompt</button>
-                    }
-                  }
-                </div>
-              </div>
-              <div class="cover-row">
-                @if (coverThumb) { <img class="cover-thumb" [src]="coverThumb" alt="Cover" /> }
-                <label class="btn small upload">
-                  {{ coverThumb ? 'Replace cover' : 'Upload cover' }}
-                  <input type="file" accept="image/*" (change)="onCoverImage($event)" hidden />
-                </label>
-              </div>
-
-              @if (coverLoading()) {
-                <div class="ai-card ai-thinking"><span class="ai-spinner"></span> Art-directing your cover on-device…</div>
-              }
-              @if (coverPromptText()) {
-                <div class="ai-card ai-suggestion">
-                  <span class="ai-eyebrow">✨ Cover image prompt</span>
-                  <p class="ai-text ai-pre">{{ coverPromptText() }}</p>
-                  <div class="ai-actions">
-                    <button class="btn btn--primary small" (click)="copyCoverPrompt()">{{ coverCopied() ? 'Copied ✓' : 'Copy prompt' }}</button>
-                    <button class="btn btn--ghost small" (click)="generateCoverPrompt()">Try again</button>
-                    <button class="btn btn--ghost small" (click)="dismissCoverPrompt()">Dismiss</button>
-                  </div>
-                  <p class="hint faint">Paste this into your image tool, then upload the result as the cover.</p>
-                </div>
-              }
+            <div class="pages-empty">
+              <p class="faint">No pages yet. Add your first page, or use ✨ Storyboard above.</p>
+              <button class="btn btn--primary" (click)="addPage()">+ Add your first page</button>
             </div>
           } @else {
-            <label class="field">
-              <span class="field-label">Choose a book</span>
-              <select class="input" [(ngModel)]="targetBookId">
-                <option value="" disabled>Select a book…</option>
-                @for (b of userBooks(); track b.id) {
-                  <option [value]="b.id">{{ b.title }}</option>
-                }
-              </select>
-            </label>
+            <!-- Page navigator: one page at a time -->
+            <div class="page-nav">
+              <button class="btn small" (click)="prevPage()" [disabled]="pageIndex() === 0" aria-label="Previous page">←</button>
+              <span class="page-nav-label">Page {{ pageIndex() + 1 }} <span class="faint">of {{ draft.pages.length }}</span></span>
+              <button class="btn small" (click)="nextPage()" [disabled]="pageIndex() === draft.pages.length - 1" aria-label="Next page">→</button>
+              <span class="page-nav-spacer"></span>
+              <button class="btn small btn--ghost" (click)="moveCurrentPage(-1)" [disabled]="pageIndex() === 0" title="Move earlier">↑</button>
+              <button class="btn small btn--ghost" (click)="moveCurrentPage(1)" [disabled]="pageIndex() === draft.pages.length - 1" title="Move later">↓</button>
+              <button class="btn small" (click)="addPage()">+ Page</button>
+              <button class="btn small btn--ghost" (click)="removeCurrentPage()">Delete</button>
+              @if (draft.pages.length > 1) {
+                <button class="btn small btn--ghost danger" (click)="removeAllPages()">Delete all</button>
+              }
+            </div>
+
+            @if (currentPage; as p) {
+              <div class="page-editor">
+                <aside class="page-preview-col">
+                  <div class="preview-head">
+                    <span class="preview-label faint">Click a panel to edit it</span>
+                    <label class="layout-pick">
+                      <span class="field-label">Layout</span>
+                      <select class="input tiny-select" [ngModel]="p.layout" (ngModelChange)="changeLayout(p, $event)">
+                        @for (l of layouts; track l.id) { <option [value]="l.id">{{ l.label }}</option> }
+                      </select>
+                    </label>
+                  </div>
+                  <app-page-preview [page]="p" [thumbs]="thumbs()" [interactive]="true"
+                                    [selectedId]="selectedPanel?.id ?? null"
+                                    (panelSelect)="selectPanel($event)" />
+                </aside>
+
+                <div class="page-edit-col">
+                  @if (selectedPanel; as panel) {
+                    <div class="panel-editor">
+                      <div class="panel-editor-head">
+                        <span class="card-idx">Panel {{ selectedPanelIndex + 1 }} <span class="faint">of {{ p.panels?.length }}</span></span>
+                      </div>
+
+                      <div class="panel-art-row">
+                        <div class="panel-art">
+                          @if (thumbs()[panel.id]) {
+                            <img [src]="thumbs()[panel.id]" alt="Panel art" />
+                          } @else {
+                            <div class="art-empty faint">No art yet</div>
+                          }
+                        </div>
+                        <div class="art-actions">
+                          <label class="btn small upload">
+                            {{ thumbs()[panel.id] ? 'Replace' : 'Upload' }}
+                            <input type="file" accept="image/*" (change)="onPanelImage($event, panel)" hidden />
+                          </label>
+                          <button class="btn small" (click)="copyPanelPrompt(p, panel, selectedPanelIndex)">
+                            {{ copiedPanelId() === panel.id ? 'Copied ✓' : 'Copy prompt' }}
+                          </button>
+                        </div>
+                      </div>
+                      @if (hasCharacterRefs) {
+                        <span class="hint faint">Paste the prompt AND attach the character reference image(s) in your image tool — that's what keeps faces consistent.</span>
+                      }
+
+                      <label class="field">
+                        <span class="field-label">What we see <span class="faint">— the panel art</span></span>
+                        <textarea class="textarea" [(ngModel)]="panel.description" (ngModelChange)="persist()"
+                                  placeholder="Describe what this panel shows — the shot, who's in it, what they're doing, the setting and lighting…"></textarea>
+                      </label>
+                      <div class="field">
+                        <div class="field-label-row">
+                          <span class="field-label">Dialogue <span class="faint">(what's lettered on the panel)</span></span>
+                          <select class="input tiny-select" [ngModel]="panel.dialogueKind || 'speech'" (ngModelChange)="setBubbleKind(panel, $event)">
+                            <option value="speech">💬 Speech</option>
+                            <option value="thought">💭 Thought</option>
+                            <option value="narration">▭ Narration</option>
+                          </select>
+                        </div>
+                        <textarea class="textarea" [(ngModel)]="panel.dialogue" (ngModelChange)="persist()"
+                                  [placeholder]="panel.dialogueKind === 'thought' ? 'A private thought — leave empty for a silent panel'
+                                                : panel.dialogueKind === 'narration' ? 'A caption, e.g. “Later that night…”'
+                                                : 'Goes in the speech bubble — leave empty for a silent panel'"></textarea>
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
           }
+        }
+
+        <!-- 5. FINISH -->
+        @case ('assemble') {
+          <!-- Front + back cover -->
+          <div class="cover-pair">
+            @for (side of coverSides; track side) {
+              <div class="cover-slot">
+                <div class="field-label-row">
+                  <span class="field-label">{{ side === 'front' ? 'Front cover' : 'Back cover' }} <span class="faint">(optional)</span></span>
+                  <div class="ai-controls">
+                    @if (aiAvailable()) {
+                      @if (coverBusy(side)) { <button class="btn small ai-btn" (click)="cancelAi()">Cancel</button> }
+                      @else { <button class="btn small ai-btn" (click)="generateCoverPrompt(side)" [disabled]="!draft.idea.trim()">✨ Prompt</button> }
+                    }
+                  </div>
+                </div>
+                @if (coverImg(side)) { <img class="cover-thumb" [src]="coverImg(side)" alt="cover" /> }
+                @else { <div class="cover-empty faint">No {{ side }} cover</div> }
+                <div class="cover-actions">
+                  <label class="btn small upload">{{ coverImg(side) ? 'Replace' : 'Upload' }}<input type="file" accept="image/*" (change)="onCoverImage($event, side)" hidden /></label>
+                  @if (coverImg(side)) { <button class="btn small btn--ghost" (click)="removeCover(side)">Remove</button> }
+                </div>
+                @if (coverBusy(side)) { <div class="ai-card ai-thinking"><span class="ai-spinner"></span> Art-directing…</div> }
+                @if (coverText(side); as t) {
+                  <div class="ai-card ai-suggestion">
+                    <span class="ai-eyebrow">✨ {{ side }} cover prompt</span>
+                    <p class="ai-text ai-pre">{{ t }}</p>
+                    <div class="ai-actions">
+                      <button class="btn btn--primary small" (click)="copyCoverPrompt(side)">{{ coverCopiedFor(side) ? 'Copied ✓' : 'Copy' }}</button>
+                      <button class="btn btn--ghost small" (click)="generateCoverPrompt(side)">Try again</button>
+                      <button class="btn btn--ghost small" (click)="dismissCoverPrompt(side)">Dismiss</button>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+          <p class="hint faint">Paste a prompt into your image tool, then upload the result to that slot.</p>
 
           <div class="publish-row">
             <button class="btn" (click)="openPreview()">Preview flipbook</button>
-            <button class="btn btn--primary" (click)="publish()" [disabled]="!canPublish() || publishing()">
-              {{ publishing() ? 'Publishing…' : 'Publish to shelf' }}
-            </button>
+            @if (isDraftBook()) {
+              <button class="btn btn--primary" (click)="finishDraft()" [disabled]="!canFinish() || publishing()">
+                {{ publishing() ? 'Saving…' : 'Save to shelf' }}
+              </button>
+            } @else {
+              <button class="btn btn--primary" (click)="done()">Done</button>
+            }
           </div>
-          @if (!canPublish()) {
-            <p class="hint faint">Add at least one page with artwork
-              @if (assembleMode() === 'new') { and a title } @else { and pick a book }
-              to publish.</p>
+          @if (isDraftBook() && !canFinish()) {
+            <p class="hint faint">Add a title to save it to your shelf.</p>
           }
         }
       }
-    </section>
+      </section>
+    </div>
 
-    <!-- Footer nav -->
+    <!-- Footer nav — pinned to the bottom of the panel -->
     <footer class="panel-foot">
       <button class="btn btn--ghost" (click)="back()">{{ isFirst() ? 'Cancel' : 'Back' }}</button>
       @if (!isLast()) {

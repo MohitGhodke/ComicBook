@@ -26,17 +26,56 @@ export interface Character {
   appearance: string;
   /** Personality / role traits. */
   traits: string;
+  /**
+   * A locked "character reference" image (a clean portrait/turnaround). Each
+   * panel prompt tells the author to attach this so the character keeps the
+   * same face/design across every panel (Midjourney --cref, SD IP-Adapter).
+   */
+  referenceImageRef?: ImageRef;
+}
+
+/** A page's frame layout. `splash` = one full image (legacy/simple pages). */
+export type LayoutId = 'splash' | 'strip3' | 'grid4' | 'feature3' | 'six';
+
+/**
+ * How a panel's line is lettered:
+ *  - `speech`    — spoken aloud (speech bubble with a tail)
+ *  - `thought`   — inner thought (thought bubble with trailing dots)
+ *  - `narration` — a caption box (scene/time setting, e.g. "Later…")
+ */
+export type BubbleKind = 'speech' | 'thought' | 'narration';
+
+/** One frame of a comic page. The app draws the frame; the art is borderless. */
+export interface Panel {
+  id: string;
+  /** What this panel depicts — feeds the image prompt. */
+  description?: string;
+  /** Clean spoken words for the speech bubble (no stage directions). */
+  dialogue?: string;
+  /** How the line is lettered (speech / thought / narration). Defaults to speech. */
+  dialogueKind?: BubbleKind;
+  /** The panel artwork. Optional while being authored. */
+  imageRef?: ImageRef;
+  /** Static, copy-paste image prompt for this panel. */
+  imagePrompt?: string;
 }
 
 export interface Page {
   id: string;
-  /** Narration/caption text for the panel. */
+  /** Frame layout for this page. Absent on legacy pages (treated as splash). */
+  layout?: LayoutId;
+  /** Ordered panels. Absent on legacy pages (migrated from the fields below). */
+  panels?: Panel[];
+
+  // ── Legacy single-image fields (pre-panels). Kept for back-compat and
+  //    migrated to a one-panel splash by migratePage(). Do not write new. ──
+  /** @deprecated legacy narration/caption. */
   caption?: string;
-  /** Spoken dialogue for the panel. */
+  /** @deprecated legacy dialogue. */
   dialogue?: string;
-  /** The page artwork. Optional while the page is still being authored. */
+  /** @deprecated legacy full-page artwork. */
   imageRef?: ImageRef;
-  /** Static, copy-paste prompt generated from the story inputs (manual v1). */
+  /** @deprecated legacy image prompt. */
   imagePrompt?: string;
 }
 
@@ -60,15 +99,31 @@ export interface ComicBook {
   chapters: Chapter[];
   /** Bundled sample books are read-only and cannot be edited/deleted. */
   readonly?: boolean;
+  /** True while still being authored (shown on the shelf as a resumable draft). */
+  draft?: boolean;
+  /** Stable seed reused across every panel prompt so the book's art stays cohesive. */
+  styleSeed?: number;
+  /** Chosen art style id (see art-styles.ts). Every image prompt adapts to it. */
+  styleId?: string;
   createdAt: number;
   updatedAt: number;
 }
 
+/** A resolved panel for the reader: displayable image URL + clean dialogue. */
+export interface ReaderPanel {
+  src: string;
+  dialogue?: string;
+  dialogueKind?: BubbleKind;
+}
+
 /** A single spread page the Reader renders, flattened from a ComicBook. */
 export interface ReaderPage {
-  /** Resolved, displayable image URL. */
-  src: string;
-  alt: string;
   isCover: boolean;
   isBack: boolean;
+  alt: string;
+  /** Covers render this single image. */
+  coverSrc?: string;
+  /** Interior pages render this framed panel layout. */
+  layout?: LayoutId;
+  panels?: ReaderPanel[];
 }

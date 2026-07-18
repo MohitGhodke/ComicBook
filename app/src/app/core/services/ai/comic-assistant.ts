@@ -1,6 +1,10 @@
 import { Injectable, inject } from '@angular/core';
 import { AiService } from './ai.service';
 import { styleBlock } from '../../style/art-style';
+import { ArtStyle } from '../../style/art-styles';
+import { cleanDialogue } from '../../util/text';
+import { BubbleKind, LayoutId } from '../../models/comic.model';
+import { LAYOUTS, panelCountFor } from '../../models/layout';
 
 /** The story so far — passed into every helper so each step builds on the last. */
 export interface StoryContext {
@@ -27,9 +31,16 @@ export type CharacterProgress = (done: number, total: number, latest: SuggestedC
 /** Progress callback for the batched (plan → expand) storyboard flow. */
 export type PageProgress = (done: number, total: number, latest: SuggestedPage) => void;
 
-export interface SuggestedPage {
-  caption: string;
+export interface SuggestedPanel {
+  description: string;
   dialogue: string;
+  dialogueKind: BubbleKind;
+}
+
+export interface SuggestedPage {
+  /** The panel layout the AI chose for this page's moment. */
+  layout: LayoutId;
+  panels: SuggestedPanel[];
 }
 
 export interface ShapedIdea {
@@ -114,17 +125,96 @@ const STORYBOARD_PLAN_SCHEMA = {
   },
 };
 
-const ONE_PAGE_SCHEMA = {
-  name: 'page',
+const PAGE_PLAN_SCHEMA = {
+  name: 'page_plan',
   schema: {
     type: 'object',
     properties: {
-      caption: { type: 'string' },
-      dialogue: { type: 'string' },
+      layout: { type: 'string', enum: ['splash', 'strip3', 'grid4', 'feature3', 'six'] },
+      panels: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            beat: { type: 'string' },
+            dialogue: { type: 'string' },
+            dialogueKind: { type: 'string', enum: ['speech', 'thought', 'narration'] },
+          },
+          required: ['beat', 'dialogue', 'dialogueKind'],
+        },
+      },
     },
-    required: ['caption', 'dialogue'],
+    required: ['layout', 'panels'],
   },
 };
+
+/** One planned panel slot: the action beat plus its line, before the art brief. */
+interface PanelPlanSlot {
+  beat: string;
+  dialogue: string;
+  dialogueKind: BubbleKind;
+}
+
+/**
+ * Rolling memory of what earlier pages ACTUALLY wrote (not just planned).
+ * Passed into every subsequent page so a small model physically cannot
+ * re-stage the same shot, re-say the same line, or pick the same layout
+ * page after page — the three failure modes of writing pages blind.
+ */
+interface StoryboardMemory {
+  /** Layouts already chosen, in page order. */
+  layouts: LayoutId[];
+  /** Every dialogue line already spoken anywhere in the book. */
+  lines: string[];
+  /** The final panel image of the previous page — the moment to move on FROM. */
+  lastImage: string;
+}
+
+/** Model sometimes leaks the dialogueKind enum (or a "none" filler) into the dialogue field. */
+const DIALOGUE_JUNK = /^(speech|thought|narration|none|n\/?a|empty|null|silence|silent|no dialogue\.?|\.{3}|…)$/i;
+
+function validLayout(v: any): LayoutId {
+  return LAYOUTS.some((l) => l.id === v) ? (v as LayoutId) : 'strip3';
+}
+
+function validBubbleKind(v: any): BubbleKind {
+  return v === 'thought' || v === 'narration' ? v : 'speech';
+}
+
+/**
+ * A distinct dramatic FUNCTION for each page, sized to the page count. Assigning
+ * every page a DIFFERENT job is the reliable way to stop a small model from
+ * writing the same beat N times — each page is forced to do something the others
+ * don't (setup ≠ inciting incident ≠ climax ≠ resolution).
+ */
+function beatFunctions(count: number): string[] {
+  if (count <= 1) return ['the ENTIRE story in one page — setup, turn and payoff'];
+  if (count === 2)
+    return [
+      'SETUP + INCITING INCIDENT: introduce who and where, then the event that kicks off the story',
+      'CLIMAX + RESOLUTION: the peak moment and how it ends',
+    ];
+  if (count === 3)
+    return [
+      'SETUP: introduce the protagonist, the place, and their normal situation',
+      'TURN: the central conflict erupts and forces a choice',
+      'RESOLUTION: the outcome — how it ends and what has changed',
+    ];
+  const fns = [
+    'SETUP: introduce the protagonist, the place, and their normal world',
+    'INCITING INCIDENT: the event that disrupts the normal world and starts the story',
+  ];
+  const middle = count - 4;
+  for (let i = 0; i < middle; i++) {
+    fns.push(
+      `RISING ACTION ${i + 1}: a NEW development — a different moment, place or obstacle that raises the stakes ` +
+        `(must NOT repeat an earlier page)`,
+    );
+  }
+  fns.push('CLIMAX: the peak confrontation or turning point the whole story has been building toward');
+  fns.push('RESOLUTION: the aftermath — how it ends and how things have CHANGED since page 1');
+  return fns;
+}
 
 /**
  * High-level, provider-agnostic comic-writing helpers. Prompt engineering lives
@@ -255,7 +345,11 @@ export class ComicAssistant {
     const system =
       'You are a comic book story editor. Using the idea and the characters, write the scene beats for this chapter: ' +
       'how the characters meet and interact, what each wants, where they clash, and how it resolves. ' +
-      'Give 4 to 7 concrete beats, specific to THESE characters and this idea. Keep it tight and vivid. ' +
+      'Give 4 to 7 concrete beats, specific to THESE characters and this idea. Keep it tight and vivid.\n' +
+      'CRITICAL: beats are SCENES, not moments — the story must TRAVEL. Spread the beats across DIFFERENT locations ' +
+      'and times (start each beat by naming where/when), and cover the FULL scope of the idea: if it promises a ' +
+      'chase, a city, a journey or a deadline, those must appear as beats. NEVER compress the whole chapter into ' +
+      'one room or one continuous conversation — that makes every drawn page look identical.\n' +
       'Return ONLY the beats as short prose or a short numbered list — no preamble.';
     return this.ai.chat(
       [
@@ -280,25 +374,50 @@ export class ComicAssistant {
     signal?: AbortSignal,
   ): Promise<SuggestedPage[]> {
     const beats = await this.planStoryboard(ctx, count, signal);
+    const memory: StoryboardMemory = { layouts: [], lines: [], lastImage: '' };
     const out: SuggestedPage[] = [];
     for (let i = 0; i < beats.length; i++) {
-      const page = await this.writePage(ctx, beats[i], i + 1, beats.length, signal);
+      // Each page sees the whole outline PLUS what earlier pages actually wrote
+      // (layouts, spoken lines, the last image) so it must move on, not repeat.
+      const page = await this.writePage(ctx, beats, i, memory, signal);
+      memory.layouts.push(page.layout);
+      for (const p of page.panels) if (p.dialogue) memory.lines.push(p.dialogue);
+      const last = page.panels[page.panels.length - 1];
+      if (last?.description) memory.lastImage = last.description;
       out.push(page);
       onProgress?.(i + 1, beats.length, page);
     }
     return out;
   }
 
-  /** Phase 1: outline the arc as one-line page beats. */
+  /**
+   * Phase 1: outline a COMPLETE, PROGRESSING arc. Each page is pinned to a
+   * distinct dramatic function (see {@link beatFunctions}) so a small model
+   * can't write the same beat repeatedly — every page must do a different job
+   * and advance from the one before.
+   */
   async planStoryboard(ctx: StoryContext, count: number, signal?: AbortSignal): Promise<string[]> {
+    const fns = beatFunctions(count);
+    const roleList = fns.map((f, i) => `Page ${i + 1} — ${f}`).join('\n');
     const system =
-      `You are a comic book writer. Outline an ordered sequence of exactly ${count} comic pages that together ` +
-      'tell a complete mini-arc, consistent with the idea, characters and beats. For each page give a one-line ' +
-      `summary of what happens on it. Return ONLY {"pages":[{"summary":""}]} with exactly ${count} items.`;
+      `You are a comic book writer plotting ONE complete, self-contained story across exactly ${count} pages. ` +
+      'Each page below has a DIFFERENT dramatic job. Write one concrete one-line summary per page that fulfils ITS ' +
+      'job, specific to this idea and these characters. HARD RULES: (1) no two pages may show the same action, place ' +
+      'or moment — each page must clearly ADVANCE from the previous one (a new development, a change of place, time ' +
+      'or situation); (2) the story must visibly MOVE — where things are by the last page must be clearly different ' +
+      'from page 1; (3) tell it through characters INTERACTING (talking, reacting, clashing), not one character ' +
+      'repeating the same activity; (4) set up the idea early and pay it off at the end; ' +
+      '(5) START each summary with where and when it happens (e.g. "That night, on the rooftop — ...") and move the ' +
+      'story through DIFFERENT locations and times — never set every page in the same room; ' +
+      '(6) each page is ONE scene: one location, one continuous moment. NEVER combine two scenes or two places into ' +
+      'a single page summary — if the story has more events than pages, keep the strongest scenes and drop the rest, ' +
+      'and let consecutive pages flow: a page should pick up where the previous one left off or clearly follow from it.\n\n' +
+      `PAGE FUNCTIONS (write one summary for each, in this order):\n${roleList}\n\n` +
+      `Return ONLY {"pages":[{"summary":""}]} with exactly ${count} items, in this order.`;
     const raw = await this.ai.chat(
       [
         { role: 'system', content: system },
-        { role: 'user', content: this.contextBlock(ctx) + `\n\nOutline ${count} pages as JSON.` },
+        { role: 'user', content: this.contextBlock(ctx) + `\n\nWrite the ${count} page summaries as JSON.` },
       ],
       { temperature: 0.7, maxTokens: 1200, schema: STORYBOARD_PLAN_SCHEMA, signal },
     );
@@ -307,28 +426,190 @@ export class ComicAssistant {
     return list.map((p: any) => String(p?.summary ?? '').trim()).filter((s: string) => s.length > 0);
   }
 
-  /** Phase 2: write ONE page's caption + dialogue from its beat — focused call. */
-  async writePage(ctx: StoryContext, summary: string, index: number, total: number, signal?: AbortSignal): Promise<SuggestedPage> {
+  /**
+   * Phase 2: write ONE page in two focused steps (same plan → expand pattern
+   * as characters, one level down):
+   *   2a. {@link planPage} — choose the layout and script the page: one action
+   *       micro-beat + one dialogue line per panel. Dialogue is planned page-wide
+   *       so the conversation alternates properly.
+   *   2b. {@link describePanel} — ONE call PER PANEL that turns its micro-beat
+   *       into the final self-contained art brief. A small model writing one
+   *       frame at a time is far sharper than one writing six at once.
+   */
+  async writePage(
+    ctx: StoryContext,
+    beats: string[],
+    pageIdx: number,
+    memory: StoryboardMemory,
+    signal?: AbortSignal,
+  ): Promise<SuggestedPage> {
+    const summary = beats[pageIdx] ?? '';
+    const plan = await this.planPage(ctx, beats, pageIdx, memory, signal);
+    const want = panelCountFor(plan.layout);
+    const panels: SuggestedPanel[] = [];
+    // Each panel also sees the one drawn just before it, so the camera varies.
+    let prevImage = memory.lastImage;
+    for (let j = 0; j < want; j++) {
+      const slot = plan.panels[j] ?? { beat: summary, dialogue: '', dialogueKind: 'speech' as BubbleKind };
+      const description = (await this.describePanel(ctx, summary, slot, j, want, prevImage, signal)) || slot.beat || summary;
+      prevImage = description;
+      panels.push({ description, dialogue: slot.dialogue, dialogueKind: slot.dialogueKind });
+    }
+    return { layout: plan.layout, panels };
+  }
+
+  /**
+   * Phase 2a: script ONE page — pick the layout and write each panel's action
+   * micro-beat and dialogue line. This call is small on purpose: no visual
+   * detail yet, just WHAT happens and WHO says what, informed by everything
+   * already written (so nothing repeats).
+   */
+  private async planPage(
+    ctx: StoryContext,
+    beats: string[],
+    pageIdx: number,
+    memory: StoryboardMemory,
+    signal?: AbortSignal,
+  ): Promise<{ layout: LayoutId; panels: PanelPlanSlot[] }> {
+    const total = beats.length;
+    const index = pageIdx + 1;
+    const summary = beats[pageIdx] ?? '';
+    const outline = beats
+      .map((b, i) => `${i + 1}. ${b}${i === pageIdx ? '   ← THIS PAGE' : ''}`)
+      .join('\n');
     const system =
-      'You are a comic book writer. Write ONE page of the comic: a short caption (the narration for the panel) ' +
-      'and dialogue (what a character says on this page; may be an empty string). Stay consistent with the story ' +
-      'and this page\'s beat, and match the pacing of its position in the sequence. ' +
-      'Return ONLY a JSON object of the form {"caption":"","dialogue":""}.';
+      'You are a comic book writer scripting ONE page of a longer story. It must ADVANCE the story: depict THIS ' +
+      'page\'s beat as a NEW moment, never a redraw or re-staging of anything already shown.\n' +
+      'HARD RULE — ONE SCENE PER PAGE: every panel on this page happens in the SAME location within the same ' +
+      'continuous moment. Never cut to a different place, a different time, or a parallel group of characters ' +
+      'mid-page. If the beat implies travel or several places, show only the destination — the most dramatic one.\n' +
+      'BRIDGE SCENE CHANGES: if this page happens in a different place or time than the page before it, panel 1 ' +
+      'must carry a short narration caption naming the new place/time (e.g. "Two days later — the launch site.") ' +
+      'with dialogueKind "narration". That caption is how the reader follows the jump.\n' +
+      'FIRST choose the panel layout that fits this moment:\n' +
+      '- splash = one big dramatic full-page panel (a reveal, a huge emotional beat)\n' +
+      '- strip3 = 3 stacked panels (steady beats, a short exchange)\n' +
+      '- grid4 = 4 panels in a 2x2 (back-and-forth, a small montage)\n' +
+      '- feature3 = 1 large panel + 2 small (a hero moment plus two reactions)\n' +
+      '- six = 6 panels (fast, busy action)\n' +
+      'Vary the book\'s rhythm: do NOT choose the same layout as the previous page (see LAYOUTS ALREADY USED) ' +
+      'unless this moment truly demands it.\n' +
+      'THEN write one entry per panel:\n' +
+      '- "beat": ONE concrete sentence of what visibly HAPPENS in that panel — the action and who is in frame ' +
+      '(name them). Every panel must show a DIFFERENT action; the page must move from its first panel to its last. ' +
+      'Do NOT put every character in every panel — cut like a film editor: a close-up on one face, an insert of ' +
+      'hands or an object, a two-shot, and only occasionally the full group.\n' +
+      '- "dialogue": the one line spoken or thought in that panel, 12 words or fewer. Characters must talk TO each ' +
+      'other — alternate speakers across panels like a real conversation, and react to what was just said. ' +
+      'Words only: NEVER a speaker name or "Name:" label, never two characters\' words in one panel, no stage ' +
+      'directions, no parentheses () or brackets []. Leave "" ONLY for a deliberate silent beat. ' +
+      'NEVER reuse a line from LINES ALREADY SPOKEN — every line in the book is said exactly once.\n' +
+      '- "dialogueKind": "speech" = said aloud; "thought" = private inner thought; "narration" = a short ' +
+      'scene-setting caption like "Later, on the rooftop." (use sparingly). Use "speech" when dialogue is "".\n' +
+      'The number of panels MUST match the layout (splash=1, strip3=3, grid4=4, feature3=3, six=6). ' +
+      'Return ONLY {"layout":"","panels":[{"beat":"","dialogue":"","dialogueKind":"speech"}]}.';
     const user =
       this.contextBlock(ctx) +
-      `\n\nThis is page ${index} of ${total}. Page beat: ${summary}\n\nWrite this page as JSON.`;
+      `\n\nFULL STORY OUTLINE (all ${total} pages, in order):\n${outline}` +
+      (memory.layouts.length
+        ? `\n\nLAYOUTS ALREADY USED (pages 1–${memory.layouts.length}, in order): ${memory.layouts.join(', ')}`
+        : '') +
+      (memory.lastImage
+        ? `\n\nTHE PREVIOUS PAGE ENDED ON THIS IMAGE (move on from it — new action, never re-stage it):\n${memory.lastImage}`
+        : '') +
+      (memory.lines.length
+        ? `\n\nLINES ALREADY SPOKEN (never repeat any of these):\n${memory.lines
+            .slice(-30)
+            .map((l) => `- ${l}`)
+            .join('\n')}`
+        : '') +
+      `\n\nWrite ONLY page ${index} of ${total} — its beat: ${summary}\nScript this page as JSON.`;
     const raw = await this.ai.chat(
       [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      { temperature: 0.7, maxTokens: 700, schema: ONE_PAGE_SCHEMA, signal },
+      { temperature: 0.75, maxTokens: 1000, schema: PAGE_PLAN_SCHEMA, signal },
     );
     const parsed = parseJsonObject(raw);
-    return {
-      caption: String(parsed?.caption ?? '').trim() || summary,
-      dialogue: String(parsed?.dialogue ?? '').trim(),
-    };
+    let layout = validLayout(parsed?.layout);
+    // Break a layout rut in code too: three identical layouts in a row gets
+    // swapped to the same-panel-count sibling, so the plan's panels still fit.
+    const [prev2, prev1] = memory.layouts.slice(-2);
+    if (memory.layouts.length >= 2 && layout === prev1 && layout === prev2) {
+      if (layout === 'feature3') layout = 'strip3';
+      else if (layout === 'strip3') layout = 'feature3';
+    }
+    const rawPanels = Array.isArray(parsed?.panels) ? parsed.panels : [];
+    const panels: PanelPlanSlot[] = rawPanels
+      .map((p: any) => {
+        const dialogue = cleanDialogue(String(p?.dialogue ?? ''));
+        return {
+          beat: String(p?.beat ?? '').trim(),
+          dialogue: DIALOGUE_JUNK.test(dialogue) ? '' : dialogue,
+          dialogueKind: validBubbleKind(p?.dialogueKind),
+        };
+      })
+      .filter((p: PanelPlanSlot) => p.beat.length > 0 || p.dialogue.length > 0);
+    return { layout, panels };
+  }
+
+  /**
+   * Phase 2b: the final art brief for EXACTLY ONE panel — the "one prompt per
+   * image" call. The model does one job: turn this panel's micro-beat into a
+   * vivid, self-contained snapshot an image generator can draw with no other
+   * context. Seeing the previous panel's brief forces camera variety.
+   */
+  private async describePanel(
+    ctx: StoryContext,
+    pageSummary: string,
+    slot: PanelPlanSlot,
+    index: number,
+    total: number,
+    prevImage: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const system =
+      'You are a comic artist writing the art brief for EXACTLY ONE panel. An image generator will draw this single ' +
+      'frame from your paragraph alone — it cannot see the story, the other panels, or any other context. Describe ' +
+      'ONLY what the camera literally sees at this instant, like a photo caption, in present tense: the shot type ' +
+      '(close-up / medium / wide / over-the-shoulder / bird\'s-eye / low angle), WHO is visible (name them) with ' +
+      'their exact pose and facial expression, the action frozen mid-moment, the setting and background, and the ' +
+      'time of day and lighting. One paragraph, 40–80 words. Never mention the plot, feelings, sound, the past or ' +
+      'future, or anything off-screen; never put written text, captions or speech inside the image. Choose a ' +
+      'DIFFERENT camera angle or distance than the previous panel so the page has visual rhythm. ' +
+      'Show ONLY the characters this panel\'s action names — do NOT add the rest of the cast to the frame. ' +
+      'Return ONLY the paragraph — no preamble, no quotes, no JSON.';
+    // Only hand the model the characters this panel actually involves — giving
+    // it the whole cast every time is how every frame becomes the same group
+    // shot. Fall back to the full cast when the beat names nobody.
+    const inShot = charactersNamedIn(ctx.characters, `${slot.beat} ${slot.dialogue}`);
+    const cast = inShot
+      .map((c) => `- ${c.name.trim()}: ${c.appearance!.trim()}`)
+      .join('\n');
+    const user =
+      (cast ? `CHARACTERS (keep each looking exactly like this):\n${cast}\n\n` : '') +
+      `SCENE (this page): ${pageSummary}\n` +
+      `THIS PANEL (${index + 1} of ${total}) SHOWS: ${slot.beat || pageSummary}\n` +
+      (slot.dialogue
+        ? `While this happens, a character is ${slot.dialogueKind === 'thought' ? 'thinking' : 'saying'}: ` +
+          `"${slot.dialogue}" — convey it through expression and body language only; no text in the image.\n`
+        : '') +
+      (prevImage ? `\nPREVIOUS PANEL, for contrast — pick a different camera: ${prevImage}\n` : '') +
+      '\nWrite the art brief for this one panel.';
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      // Generous ceiling: a reasoning model thinks before it answers, and a
+      // non-reasoning one just stops early — a high cap costs nothing.
+      { temperature: 0.7, maxTokens: 1200, signal },
+    );
+    return (raw ?? '')
+      .replace(/\s+/g, ' ')
+      .replace(/^["'“”\s]+|["'“”\s]+$/g, '')
+      .trim();
   }
 
   // ── Assemble: cover art prompt ───────────────────────────────────────────────
@@ -340,6 +621,7 @@ export class ComicAssistant {
   async coverPrompt(
     ctx: StoryContext,
     title: string,
+    style: ArtStyle,
     side: 'front' | 'back' = 'front',
     signal?: AbortSignal,
   ): Promise<string> {
@@ -368,7 +650,7 @@ export class ComicAssistant {
     if (!composition) return composition;
     // Bake in the shared style + aspect ratio so every cover matches the pages.
     const heading = `${side === 'back' ? 'Back' : 'Front'} cover of the comic book${title?.trim() ? ` "${title.trim()}"` : ''}.`;
-    return `${heading}\n${composition}\n\n${styleBlock()}`;
+    return `${heading}\n${composition}\n\n${styleBlock(style)}`;
   }
 
   // ── Editor: qualitative review ───────────────────────────────────────────────
@@ -413,6 +695,25 @@ export class ComicAssistant {
     if (ctx.synopsis?.trim()) lines.push(`STORY BEATS: ${ctx.synopsis.trim()}`);
     return lines.join('\n');
   }
+}
+
+/**
+ * The characters whose name (or distinctive first name) appears in the text.
+ * Falls back to the whole described cast when nobody is named, so a vague
+ * beat still renders consistent characters.
+ */
+function charactersNamedIn(
+  characters: StoryContext['characters'],
+  text: string,
+): StoryContext['characters'] {
+  const cast = (characters || []).filter((c) => c.name?.trim() && c.appearance?.trim());
+  const hay = (text || '').toLowerCase();
+  if (!hay.trim()) return cast;
+  const named = cast.filter((c) => {
+    const first = c.name!.trim().split(/\s+/)[0].toLowerCase();
+    return hay.includes(c.name!.trim().toLowerCase()) || (first.length >= 3 && hay.includes(first));
+  });
+  return named.length ? named : cast;
 }
 
 /** Parse a JSON object from a model reply, tolerating stray prose or code fences. */

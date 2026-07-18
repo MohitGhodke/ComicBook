@@ -14,12 +14,14 @@ export const routes: Routes = [
     loadComponent: () => import('./features/creator/creator').then((m) => m.Creator),
   },
   {
-    path: 'edit/:id',
-    loadComponent: () => import('./features/editor/book-editor').then((m) => m.BookEditor),
-  },
-  {
-    path: 'create/:draftId',
+    // Editing reuses the create wizard, pre-loaded with the book.
+    path: 'create/:bookId',
     loadComponent: () => import('./features/creator/creator').then((m) => m.Creator),
+  },
+  { path: 'edit/:id', redirectTo: 'create/:id' },
+  {
+    path: 'settings',
+    loadComponent: () => import('./features/settings/settings').then((m) => m.Settings),
   },
   { path: '**', redirectTo: '' },
 ];

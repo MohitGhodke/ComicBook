@@ -1,0 +1,36 @@
+<div class="settings">
+  <header class="settings-head">
+    <a class="back" routerLink="/">← Shelf</a>
+    <h1>Settings</h1>
+    <p class="muted">Preferences for how new comics are created. Saved on this device.</p>
+  </header>
+
+  <section class="block">
+    <h2>Default art style</h2>
+    <p class="muted sub">The look every new comic starts with. Each image prompt adapts to it — a Western-ink book and a manga book generate very different prompts. You can still change the style per comic.</p>
+
+    <ul class="style-list">
+      @for (s of styles; track s.id) {
+        <li class="style-opt" [class.selected]="defaultStyleId() === s.id" (click)="chooseStyle(s.id)">
+          <span class="radio" [class.on]="defaultStyleId() === s.id"></span>
+          <span class="style-body">
+            <span class="style-label">{{ s.label }}</span>
+            <span class="style-desc muted">{{ s.description }}</span>
+          </span>
+        </li>
+      }
+    </ul>
+  </section>
+
+  <section class="block">
+    <h2>On-device AI server</h2>
+    <p class="muted sub">The local OpenAI-compatible server used for writing help (LM Studio, Ollama, mlx-lm). No cloud.</p>
+    <label class="field">
+      <span class="field-label">Server address</span>
+      <div class="row">
+        <input class="input" [(ngModel)]="aiUrl" (blur)="saveAiUrl()" placeholder="http://localhost:1234" />
+        <button class="btn" (click)="saveAiUrl()">Save</button>
+      </div>
+    </label>
+  </section>
+</div>

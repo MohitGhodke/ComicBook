@@ -38,11 +38,29 @@ export class LocalServerAiService extends AiService {
   }
 
   async chat(messages: AiMessage[], opts: ChatOptions = {}): Promise<string> {
+    // Reasoning models spend an unpredictable share of the token budget
+    // "thinking" before the answer appears in `content`. If the budget runs
+    // out mid-reasoning, retry once with a much larger allowance instead of
+    // failing the caller's whole flow.
+    const budget = opts.maxTokens ?? 400;
+    let out = await this.completeOnce(messages, opts, budget);
+    if (out === null) out = await this.completeOnce(messages, opts, budget * 4);
+    if (out === null) {
+      throw new Error(
+        'The model used all its tokens thinking, even after retrying with a larger budget. ' +
+          'Pick a smaller/non-reasoning model, or turn off thinking in your local server.',
+      );
+    }
+    return out;
+  }
+
+  /** One completion attempt. Returns null when the model starved mid-reasoning. */
+  private async completeOnce(messages: AiMessage[], opts: ChatOptions, maxTokens: number): Promise<string | null> {
     const body: Record<string, unknown> = {
       model: await this.resolveModel(),
       messages,
       temperature: opts.temperature ?? 0.7,
-      max_tokens: opts.maxTokens ?? 400,
+      max_tokens: maxTokens,
       stream: false,
     };
     if (opts.schema) {
@@ -61,14 +79,23 @@ export class LocalServerAiService extends AiService {
     if (!res.ok) throw new Error(`chat request failed: ${res.status}`);
     const data = await res.json();
     const choice = data?.choices?.[0];
-    const content = (choice?.message?.content ?? '').trim();
-    // Reasoning models emit chain-of-thought into `reasoning_content` and the
-    // answer into `content`. If the token budget runs out during reasoning the
-    // server returns finish_reason "length" with an empty `content` — surface
-    // that clearly instead of returning nothing.
-    if (!content && choice?.finish_reason === 'length') {
-      throw new Error('The model used all its tokens before answering. Try again (or pick a smaller/non-reasoning model).');
-    }
+    const content = stripThinking(choice?.message?.content ?? '');
+    // Some servers put chain-of-thought in `reasoning_content` and the answer
+    // in `content`; if the budget ran out during reasoning, `content` is empty
+    // (or is one truncated <think> block) with finish_reason "length".
+    if (!content && choice?.finish_reason === 'length') return null;
     return content;
   }
+}
+
+/**
+ * Remove chain-of-thought a reasoning model leaks into `content` as
+ * <think>…</think> blocks. An unclosed <think> means the reply was cut off
+ * mid-reasoning — everything from it onward is thinking, not answer.
+ */
+function stripThinking(text: string): string {
+  let out = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  const open = out.search(/<think>/i);
+  if (open >= 0) out = out.slice(0, open);
+  return out.trim();
 }

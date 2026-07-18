@@ -9,6 +9,7 @@ interface ShelfItem {
   coverUrl: string;
   pages: number;
   editable: boolean;
+  isDraft: boolean;
 }
 
 @Component({
@@ -38,30 +39,38 @@ export class Shelf implements OnInit {
         book,
         coverUrl: book.coverImageRef ? await this.storage.resolveUrl(book.coverImageRef) : '',
         pages: this.library.pageCount(book),
-        editable: !book.readonly,
+        editable: !book.readonly && !book.draft,
+        isDraft: !!book.draft,
       });
     }
     this.items.set(items);
     this.loading.set(false);
   }
 
-  open(book: ComicBook) {
-    this.router.navigate(['/read', book.id]);
+  open(item: ShelfItem) {
+    // A draft resumes in the wizard; a finished book opens in the reader.
+    if (item.isDraft) this.router.navigate(['/create', item.book.id]);
+    else this.router.navigate(['/read', item.book.id]);
   }
 
   create() {
     this.router.navigate(['/create']);
   }
 
-  edit(event: Event, book: ComicBook) {
-    event.stopPropagation();
-    this.router.navigate(['/edit', book.id]);
+  settings() {
+    this.router.navigate(['/settings']);
   }
 
-  async remove(event: Event, book: ComicBook) {
+  edit(event: Event, book: ComicBook) {
     event.stopPropagation();
-    if (!confirm(`Delete "${book.title}"? This can't be undone.`)) return;
-    await this.library.delete(book.id);
+    this.router.navigate(['/create', book.id]); // edit = the create wizard, pre-loaded
+  }
+
+  async remove(event: Event, item: ShelfItem) {
+    event.stopPropagation();
+    const msg = item.isDraft ? 'Discard this draft?' : `Delete "${item.book.title}"? This can't be undone.`;
+    if (!confirm(msg)) return;
+    await this.library.delete(item.book.id);
     await this.reload();
   }
 }

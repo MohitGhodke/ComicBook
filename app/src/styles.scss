@@ -94,8 +94,107 @@ a { color: inherit; }
   padding: 0.7rem 0.85rem;
   width: 100%;
 }
-.textarea { resize: vertical; min-height: 5.5rem; line-height: 1.5; }
+.textarea { resize: vertical; min-height: 8.5rem; line-height: 1.5; }
 .input:focus, .textarea:focus { border-color: var(--focus); outline: none; }
 
 .muted { color: var(--ink-soft); }
 .faint { color: var(--ink-faint); }
+
+/* ── Composed comic page (shared by the reader and the live preview) ─────────
+   Generic, container-aware panel layout. Bubble text scales with page width
+   via container-query units so it reads correctly at any size. */
+.panel-grid {
+  width: 100%; height: 100%;
+  display: grid;
+  gap: 1.4%;
+  padding: 1.4%;
+  background: #fff;
+  box-sizing: border-box;
+  container-type: inline-size;
+}
+.panel {
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  background: #fff;
+}
+.panel > img {
+  width: 100%; height: 100%;
+  object-fit: cover;        /* crop art to fill its frame */
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* Splash = one full-bleed image (preserves pre-drawn full-page art). */
+.panel-grid.layout-splash { padding: 0; gap: 0; background: #fff; }
+.panel-grid.layout-splash .panel { border: none; border-radius: 0; background: #fff; }
+.panel-grid.layout-splash .panel > img { object-fit: contain; }
+
+.layout-strip3   { grid-template-columns: 1fr; grid-template-rows: repeat(3, 1fr); }
+.layout-grid4    { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.layout-feature3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1.5fr 1fr; }
+.layout-feature3 .panel:first-child { grid-column: 1 / -1; }
+.layout-six      { grid-template-columns: 1fr 1fr; grid-template-rows: repeat(3, 1fr); }
+
+.panel .bubble {
+  position: absolute;
+  left: 7%; bottom: 9%;
+  max-width: 70%;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: 0.85em;
+  padding: 0.3em 0.55em;
+  font-family: var(--font-body);
+  font-weight: 500;
+  line-height: 1.2;
+  font-size: 3.8cqi;        /* scales with the page's width */
+  box-shadow: 1.5px 1.5px 0 rgba(0, 0, 0, 0.16);
+}
+/* Speech-bubble tail — a small pointer so it reads as spoken, not a caption. */
+.panel .bubble::after {
+  content: '';
+  position: absolute;
+  left: 20%; bottom: -0.42em;
+  width: 0.62em; height: 0.62em;
+  background: #fff;
+  border-right: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  transform: rotate(45deg);
+}
+
+/* Thought bubble — rounder, with two trailing dots instead of a sharp tail. */
+.panel .bubble.thought {
+  border-radius: 1.3em;
+  font-style: italic;
+}
+.panel .bubble.thought::after,
+.panel .bubble.thought::before {
+  content: '';
+  position: absolute;
+  background: #fff;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  transform: none;
+}
+.panel .bubble.thought::after  { left: 15%; bottom: -0.62em; width: 0.5em;  height: 0.5em; }
+.panel .bubble.thought::before { left: 9%;  bottom: -1.05em; width: 0.32em; height: 0.32em; }
+
+/* Narration caption — a rectangular box at the top, no tail. */
+.panel .bubble.narration {
+  left: 5%; right: 5%; top: 5%; bottom: auto;
+  max-width: none;
+  border-radius: 0.2em;
+  font-style: italic;
+  box-shadow: 1.5px 1.5px 0 rgba(0, 0, 0, 0.16);
+}
+.panel .bubble.narration::after,
+.panel .bubble.narration::before { display: none; }
+.panel .panel-empty {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  color: var(--ink-faint);
+  font-size: 3.5cqi;
+}

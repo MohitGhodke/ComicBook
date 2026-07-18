@@ -6,7 +6,10 @@
         <p class="muted">A shelf of comics — read one, or create your own.</p>
       </div>
     </div>
-    <button class="btn btn--primary" (click)="create()">+ Create a comic</button>
+    <div class="head-actions">
+      <button class="btn btn--ghost" (click)="settings()">⚙ Settings</button>
+      <button class="btn btn--primary" (click)="create()">+ Create a comic</button>
+    </div>
   </header>
 
   @if (loading()) {
@@ -21,24 +24,37 @@
       </button>
 
       @for (item of items(); track item.book.id) {
-        <article class="tile" (click)="open(item.book)">
+        <article class="tile" (click)="open(item)">
           <div class="cover">
             @if (item.coverUrl) {
               <img [src]="item.coverUrl" [alt]="item.book.title" />
             } @else {
-              <div class="cover-empty faint">No cover yet</div>
+              <div class="cover-empty">
+                <span class="cover-empty-mark">▢</span>
+                <span class="faint">{{ item.isDraft ? 'Draft — no cover' : 'No cover' }}</span>
+              </div>
             }
-            @if (!item.editable) { <span class="badge">Sample</span> }
+            @if (!item.editable && !item.isDraft) { <span class="badge">Sample</span> }
+            @if (item.isDraft) { <span class="badge badge--draft">Draft</span> }
           </div>
           <div class="meta">
             <h3 class="title">{{ item.book.title }}</h3>
             <p class="muted sub">
-              {{ item.book.author || 'Unknown author' }} · {{ item.pages }} page{{ item.pages === 1 ? '' : 's' }}
+              @if (item.isDraft) {
+                In progress · {{ item.pages }} page{{ item.pages === 1 ? '' : 's' }}
+              } @else {
+                {{ item.book.author || 'Unknown author' }} · {{ item.pages }} page{{ item.pages === 1 ? '' : 's' }}
+              }
             </p>
-            @if (item.editable) {
+            @if (item.isDraft) {
+              <div class="tile-actions">
+                <button class="btn tile-btn" (click)="open(item)">Continue</button>
+                <button class="btn btn--ghost tile-btn danger" (click)="remove($event, item)">Discard</button>
+              </div>
+            } @else if (item.editable) {
               <div class="tile-actions">
                 <button class="btn tile-btn" (click)="edit($event, item.book)">✎ Edit</button>
-                <button class="btn btn--ghost tile-btn danger" (click)="remove($event, item.book)">Delete</button>
+                <button class="btn btn--ghost tile-btn danger" (click)="remove($event, item)">Delete</button>
               </div>
             }
           </div>

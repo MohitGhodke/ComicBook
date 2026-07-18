@@ -1,15 +1,23 @@
 import { Component, inject, signal, computed, WritableSignal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Reader } from '../reader/reader';
+import { PagePreview } from '../shared/page-preview';
 import { ComicLibraryService } from '../../core/services/comic-library.service';
 import { StorageService } from '../../core/services/storage.service';
 import { PromptService } from '../../core/services/prompt.service';
 import { ComicAssistant, StoryContext, SuggestedCharacter, SuggestedPage, ShapedIdea } from '../../core/services/ai/comic-assistant';
 import { AiConfig } from '../../core/services/ai/ai.config';
-import { ComicBook, Character, Chapter, Page, ReaderPage } from '../../core/models/comic.model';
+import { ComicBook, Character, Chapter, Page, Panel, ImageRef, LayoutId, ReaderPage, BubbleKind } from '../../core/models/comic.model';
+import { LAYOUTS, newPanel, applyLayout, migratePage } from '../../core/models/layout';
 import { newId } from '../../core/util/id';
-import { Draft, loadDraft, saveDraft, clearDraft, emptyDraft } from './draft';
+import { cleanDialogue } from '../../core/util/text';
+import { Draft, emptyDraft, draftHasContent, newStyleSeed } from '../../core/services/draft';
+import { StyleConfig } from '../../core/services/style.config';
+import { ART_STYLES, artStyleById } from '../../core/style/art-styles';
+
+type CoverSide = 'front' | 'back';
+// (multi-book "add as chapter" was removed — every comic is its own book, edited in place)
 
 interface StepDef {
   key: string;
@@ -22,17 +30,30 @@ type AssembleMode = 'new' | 'existing';
 
 @Component({
   selector: 'app-creator',
-  imports: [FormsModule, Reader],
+  imports: [FormsModule, RouterLink, Reader, PagePreview],
   templateUrl: './creator.html',
   styleUrl: './creator.scss',
 })
 export class Creator implements OnInit {
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
   private library = inject(ComicLibraryService);
   private storage = inject(StorageService);
   private prompts = inject(PromptService);
   private assistant = inject(ComicAssistant);
   private aiConfig = inject(AiConfig);
+  private styleConfig = inject(StyleConfig);
+
+  /** All selectable art styles + the one this comic uses. */
+  readonly artStyles = ART_STYLES;
+  private style() { return artStyleById(this.draft.styleId); }
+
+  /** The book being authored — always a real storage id (draft or finished). */
+  bookId = '';
+  /** True while it's still a draft; false once finished / when editing a book. */
+  readonly isDraftBook = signal(true);
+  readonly isEditing = computed(() => !this.isDraftBook());
+  private createdAt = 0;
 
   readonly steps: StepDef[] = [
     { key: 'idea', label: 'Idea', title: 'Start with your idea',
@@ -43,25 +64,26 @@ export class Creator implements OnInit {
       teach: 'A story is characters colliding — meeting, disagreeing, helping, changing. Sketch the beats of this chapter: how the characters interact, scene by scene.' },
     { key: 'pages', label: 'Pages', title: 'Build your pages',
       teach: 'Turn the story into pages. For each page write the caption and dialogue, then add art — upload an image, or copy a ready-made prompt to generate one in your favourite tool.' },
-    { key: 'assemble', label: 'Assemble', title: 'Assemble & publish',
-      teach: 'Start a brand-new book, or add this as a new chapter to a book you already made. Preview the flipbook, then publish it to your shelf.' },
+    { key: 'assemble', label: 'Finish', title: 'Cover & finish',
+      teach: 'Add a front and back cover (optional), preview the flipbook, then save it to your shelf.' },
   ];
 
   draft: Draft = emptyDraft();
   readonly step = signal(0);
 
-  // Assemble step state
-  readonly assembleMode = signal<AssembleMode>('new');
-  readonly userBooks = signal<ComicBook[]>([]);
-  targetBookId = '';
-
   // Thumbnails + preview
   readonly thumbs = signal<Record<string, string>>({});
   coverThumb = '';
+  backThumb = '';
   readonly previewing = signal(false);
   readonly previewPages = signal<ReaderPage[]>([]);
   readonly publishing = signal(false);
-  readonly copiedPageId = signal<string | null>(null);
+  readonly copiedPanelId = signal<string | null>(null);
+  readonly copiedCharId = signal<string | null>(null);
+  readonly layouts = LAYOUTS;
+  readonly defaultLayout: LayoutId = 'strip3';
+  /** Index of the page being edited in the page-at-a-time Pages step. */
+  readonly pageIndex = signal(0);
 
   // On-device AI assist
   readonly aiAvailable = signal(false);
@@ -85,19 +107,54 @@ export class Creator implements OnInit {
   readonly storyProgress = signal<{ done: number; total: number } | null>(null);
   storyboardCount = 6;
 
-  readonly coverLoading = signal(false);
-  readonly coverPromptText = signal<string | null>(null);
-  readonly coverCopied = signal(false);
+  readonly frontCoverLoading = signal(false);
+  readonly frontCoverPrompt = signal<string | null>(null);
+  readonly frontCoverCopied = signal(false);
+  readonly backCoverLoading = signal(false);
+  readonly backCoverPrompt = signal<string | null>(null);
+  readonly backCoverCopied = signal(false);
 
   readonly current = computed(() => this.steps[this.step()]);
   readonly isLast = computed(() => this.step() === this.steps.length - 1);
   readonly isFirst = computed(() => this.step() === 0);
 
   async ngOnInit() {
-    this.draft = loadDraft();
+    const paramId = this.route.snapshot.paramMap.get('bookId');
+    if (paramId) {
+      const book = await this.library.get(paramId);
+      if (!book || book.readonly) { this.router.navigate(['/']); return; }
+      this.loadBook(book); // resume/edit an existing book or draft
+    } else {
+      // Fresh comic: a brand-new draft book with its own id — clean slate.
+      this.bookId = newId('book');
+      this.isDraftBook.set(true);
+      this.createdAt = timestamp();
+      this.draft = emptyDraft();
+      this.draft.styleId = this.styleConfig.defaultStyleId(); // capture the current default
+    }
     await this.refreshThumbs();
-    this.userBooks.set(await this.library.getUserBooks());
     this.probeAi();
+  }
+
+  /** Load an existing book into the wizard's working draft. */
+  private loadBook(book: ComicBook) {
+    this.bookId = book.id;
+    this.isDraftBook.set(book.draft ?? false);
+    this.createdAt = book.createdAt;
+    this.draft = {
+      title: book.title,
+      idea: book.idea ?? '',
+      author: book.author ?? '',
+      characters: book.characters ?? [],
+      // All chapters' scene beats + pages are edited as one flat sequence.
+      synopsis: book.chapters.map((c) => c.synopsis).filter((s) => s?.trim()).join('\n\n'),
+      coverImageRef: book.coverImageRef,
+      backCoverImageRef: book.backCoverImageRef,
+      pages: book.chapters.flatMap((c) => c.pages).map(migratePage),
+      // Older books have no seed — assign one now so their art can be cohesive.
+      styleSeed: book.styleSeed ?? newStyleSeed(),
+      styleId: book.styleId ?? this.styleConfig.defaultStyleId(),
+    };
   }
 
   // ── On-device AI ───────────────────────────────────────────────────────────
@@ -238,57 +295,105 @@ export class Creator implements OnInit {
     if (pages !== null && this.storySuggestions() === null) this.storySuggestions.set(pages);
   }
   addStoryboardPages() {
-    for (const p of this.storySuggestions() ?? []) {
-      this.draft.pages.push({ id: newId('page'), caption: p.caption, dialogue: p.dialogue });
-    }
+    const sugg = this.storySuggestions() ?? [];
+    if (!sugg.length) return;
+    const firstNew = this.draft.pages.length;
+    const created: Page[] = sugg.map((sp) => ({
+      id: newId('page'),
+      layout: sp.layout,
+      panels: sp.panels.map((pl) => newPanel({ description: pl.description, dialogue: cleanDialogue(pl.dialogue), dialogueKind: pl.dialogueKind })),
+    }));
+    this.draft.pages = [...this.draft.pages, ...created]; // new array reference
     this.storySuggestions.set(null);
+    this.pageIndex.set(firstNew); // jump to the first generated page
     this.persist();
   }
   dismissStoryboard() { this.storySuggestions.set(null); }
 
-  // Step 5 — Cover image prompt
-  async generateCoverPrompt() {
+  // Step 5 — Cover image prompt (front / back)
+  readonly coverSides: CoverSide[] = ['front', 'back'];
+  coverImg(side: CoverSide): string { return side === 'front' ? this.coverThumb : this.backThumb; }
+  coverBusy(side: CoverSide): boolean { return (side === 'front' ? this.frontCoverLoading : this.backCoverLoading)(); }
+  coverText(side: CoverSide): string | null { return (side === 'front' ? this.frontCoverPrompt : this.backCoverPrompt)(); }
+  coverCopiedFor(side: CoverSide): boolean { return (side === 'front' ? this.frontCoverCopied : this.backCoverCopied)(); }
+
+  async generateCoverPrompt(side: CoverSide) {
     if (!this.draft.idea.trim()) return;
-    this.coverCopied.set(false);
-    this.coverPromptText.set(null);
-    const prompt = await this.run(this.coverLoading, (s) =>
-      this.assistant.coverPrompt(this.storyContext(), this.draft.title, 'front', s),
-    );
+    const loading = side === 'front' ? this.frontCoverLoading : this.backCoverLoading;
+    const text = side === 'front' ? this.frontCoverPrompt : this.backCoverPrompt;
+    const copied = side === 'front' ? this.frontCoverCopied : this.backCoverCopied;
+    copied.set(false);
+    text.set(null);
+    const prompt = await this.run(loading, (s) => this.assistant.coverPrompt(this.storyContext(), this.draft.title, this.style(), side, s));
     if (prompt !== null) {
-      this.coverPromptText.set(prompt || '(the model returned nothing — try again)');
-      this.copyCoverPrompt();
+      text.set(prompt || '(the model returned nothing — try again)');
+      this.writeClipboard(prompt, copied);
     }
   }
-  async copyCoverPrompt() {
-    const text = this.coverPromptText();
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      this.coverCopied.set(true);
-      setTimeout(() => this.coverCopied.set(false), 1800);
-    } catch { /* clipboard blocked — text is still shown for manual copy */ }
+  async copyCoverPrompt(side: CoverSide) {
+    const text = (side === 'front' ? this.frontCoverPrompt : this.backCoverPrompt)();
+    const copied = side === 'front' ? this.frontCoverCopied : this.backCoverCopied;
+    if (text) this.writeClipboard(text, copied);
   }
-  dismissCoverPrompt() { this.coverPromptText.set(null); }
+  dismissCoverPrompt(side: CoverSide) {
+    (side === 'front' ? this.frontCoverPrompt : this.backCoverPrompt).set(null);
+  }
+  private async writeClipboard(t: string, copied: WritableSignal<boolean>) {
+    try { await navigator.clipboard.writeText(t); copied.set(true); setTimeout(() => copied.set(false), 1800); } catch { /* blocked */ }
+  }
 
-  // ── Draft persistence ──────────────────────────────────────────────────────
+  // ── Autosave — always to the book in storage ────────────────────────────────
   persist() {
-    saveDraft(this.draft);
+    // A brand-new draft is only written once it has content (no empty shelf tiles);
+    // an already-real book always saves.
+    if (!this.isDraftBook() || draftHasContent(this.draft)) {
+      this.library.save(this.buildBookFromDraft());
+    }
+  }
+
+  private buildBookFromDraft(): ComicBook {
+    return {
+      id: this.bookId,
+      title: this.draft.title.trim() || 'Untitled',
+      idea: this.draft.idea.trim(),
+      author: this.draft.author.trim() || undefined,
+      coverImageRef: this.draft.coverImageRef,
+      backCoverImageRef: this.draft.backCoverImageRef,
+      characters: this.draft.characters,
+      chapters: [{ id: 'chapter-1', title: this.draft.title || 'Chapter', synopsis: this.draft.synopsis, pages: this.draft.pages }],
+      draft: this.isDraftBook(),
+      styleSeed: this.draft.styleSeed,
+      styleId: this.draft.styleId,
+      createdAt: this.createdAt,
+      updatedAt: timestamp(),
+    };
   }
 
   private async refreshThumbs() {
     const map: Record<string, string> = {};
     for (const page of this.draft.pages) {
-      if (page.imageRef) map[page.id] = await this.storage.resolveUrl(page.imageRef);
+      for (const panel of page.panels ?? []) {
+        if (panel.imageRef) map[panel.id] = await this.storage.resolveUrl(panel.imageRef);
+      }
+    }
+    // Character reference images share the map (ids never collide with panel ids).
+    for (const c of this.draft.characters) {
+      if (c.referenceImageRef) map[c.id] = await this.storage.resolveUrl(c.referenceImageRef);
     }
     this.thumbs.set(map);
     this.coverThumb = this.draft.coverImageRef ? await this.storage.resolveUrl(this.draft.coverImageRef) : '';
+    this.backThumb = this.draft.backCoverImageRef ? await this.storage.resolveUrl(this.draft.backCoverImageRef) : '';
+  }
+
+  private allPanels(): Panel[] {
+    return this.draft.pages.flatMap((pg) => pg.panels ?? []);
   }
 
   // ── Stepper ────────────────────────────────────────────────────────────────
   canAdvance(): boolean {
     switch (this.steps[this.step()].key) {
       case 'idea': return this.draft.idea.trim().length > 0;
-      case 'pages': return this.draft.pages.some((p) => !!p.imageRef);
+      // Images are optional — the user can build the story now and add art later.
       default: return true;
     }
   }
@@ -319,53 +424,165 @@ export class Creator implements OnInit {
     this.persist();
   }
 
-  // ── Pages ──────────────────────────────────────────────────────────────────
+  // ── Pages & panels (one page at a time) ──────────────────────────────────────
+  get currentPage(): Page | null {
+    const pages = this.draft.pages;
+    if (!pages.length) return null;
+    // Self-correct a stale index so pages always render.
+    const i = Math.min(Math.max(this.pageIndex(), 0), pages.length - 1);
+    return pages[i] ?? null;
+  }
+
+  /** Which panel of the current page is being edited (click-a-section-to-edit). */
+  readonly selectedPanelId = signal<string | null>(null);
+  selectPanel(id: string) { this.selectedPanelId.set(id); }
+
+  /** The panel currently open in the editor — falls back to the first panel so
+   *  something valid always shows, even right after navigating to a new page. */
+  get selectedPanel(): Panel | null {
+    const panels = this.currentPage?.panels;
+    if (!panels?.length) return null;
+    return panels.find((p) => p.id === this.selectedPanelId()) ?? panels[0];
+  }
+  /** Index of {@link selectedPanel} within its page (for the aspect-aware prompt). */
+  get selectedPanelIndex(): number {
+    const panels = this.currentPage?.panels ?? [];
+    const sel = this.selectedPanel;
+    return sel ? panels.findIndex((p) => p.id === sel.id) : 0;
+  }
+  private clampPageIndex() {
+    const max = Math.max(0, this.draft.pages.length - 1);
+    if (this.pageIndex() > max) this.pageIndex.set(max);
+  }
+  goToPage(i: number) {
+    this.pageIndex.set(Math.min(Math.max(i, 0), Math.max(0, this.draft.pages.length - 1)));
+  }
+  prevPage() { this.goToPage(this.pageIndex() - 1); }
+  nextPage() { this.goToPage(this.pageIndex() + 1); }
+
   addPage() {
-    this.draft.pages.push({ id: newId('page'), caption: '', dialogue: '' });
+    const page: Page = { id: newId('page'), layout: this.defaultLayout, panels: [] };
+    applyLayout(page, this.defaultLayout);
+    this.draft.pages = [...this.draft.pages, page]; // new array reference
+    this.pageIndex.set(this.draft.pages.length - 1); // focus the new page
     this.persist();
   }
-  removePage(p: Page) {
+  removeCurrentPage() {
+    const p = this.currentPage;
+    if (!p) return;
+    if (!confirm(`Delete page ${this.pageIndex() + 1}?`)) return;
     this.draft.pages = this.draft.pages.filter((x) => x.id !== p.id);
+    this.clampPageIndex();
     this.persist();
   }
-  movePage(p: Page, dir: -1 | 1) {
-    const i = this.draft.pages.findIndex((x) => x.id === p.id);
+  /** Wipe every page at once — handy when the story's core changes. One prompt. */
+  async removeAllPages() {
+    const count = this.draft.pages.length;
+    if (!count) return;
+    if (!confirm(`Delete all ${count} page${count === 1 ? '' : 's'}? This can't be undone.`)) return;
+    // Free the panel image blobs so they don't orphan in storage.
+    for (const page of this.draft.pages) {
+      for (const panel of page.panels ?? []) {
+        if (panel.imageRef?.kind === 'local') await this.storage.deleteImage(panel.imageRef);
+      }
+    }
+    this.draft.pages = [];
+    this.pageIndex.set(0);
+    this.selectedPanelId.set(null);
+    this.persist();
+    await this.refreshThumbs();
+  }
+  moveCurrentPage(dir: -1 | 1) {
+    const i = this.pageIndex();
     const j = i + dir;
-    if (i < 0 || j < 0 || j >= this.draft.pages.length) return;
+    if (j < 0 || j >= this.draft.pages.length) return;
     const arr = this.draft.pages;
     [arr[i], arr[j]] = [arr[j], arr[i]];
+    this.pageIndex.set(j);
+    this.persist();
+  }
+  changeLayout(page: Page, layout: LayoutId) {
+    applyLayout(page, layout);
     this.persist();
   }
 
-  async onPageImage(event: Event, page: Page) {
+  /** Store a new image; delete the old local blob it replaces (avoids orphans). */
+  private async putReplacing(oldRef: ImageRef | undefined, file: Blob): Promise<ImageRef> {
+    if (oldRef?.kind === 'local') await this.storage.deleteImage(oldRef);
+    return this.storage.putImage(file);
+  }
+
+  setBubbleKind(panel: Panel, kind: BubbleKind) {
+    panel.dialogueKind = kind;
+    this.persist();
+  }
+
+  async onPanelImage(event: Event, panel: Panel) {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
-    page.imageRef = await this.storage.putImage(file);
+    panel.imageRef = await this.putReplacing(panel.imageRef, file);
     this.persist();
     await this.refreshThumbs();
   }
 
-  async onCoverImage(event: Event) {
+  async onCoverImage(event: Event, side: CoverSide) {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
-    this.draft.coverImageRef = await this.storage.putImage(file);
+    if (side === 'front') this.draft.coverImageRef = await this.putReplacing(this.draft.coverImageRef, file);
+    else this.draft.backCoverImageRef = await this.putReplacing(this.draft.backCoverImageRef, file);
     this.persist();
     await this.refreshThumbs();
   }
+  async removeCover(side: CoverSide) {
+    const ref = side === 'front' ? this.draft.coverImageRef : this.draft.backCoverImageRef;
+    if (ref) await this.storage.deleteImage(ref);
+    if (side === 'front') { this.draft.coverImageRef = undefined; this.coverThumb = ''; }
+    else { this.draft.backCoverImageRef = undefined; this.backThumb = ''; }
+    this.persist();
+  }
 
-  async copyPrompt(page: Page) {
-    const prompt = this.prompts.buildPagePrompt(
-      { idea: this.draft.idea, characters: this.draft.characters },
-      { synopsis: this.draft.synopsis },
-      { caption: page.caption, dialogue: page.dialogue },
+  /** Whether any character has a locked reference image (drives the attach-it hint). */
+  get hasCharacterRefs(): boolean {
+    return this.draft.characters.some((c) => !!c.referenceImageRef);
+  }
+
+  async copyPanelPrompt(page: Page, panel: Panel, index: number) {
+    const prompt = this.prompts.buildPanelPrompt(
+      { characters: this.draft.characters, style: this.style() },
+      { description: panel.description },
+      page.layout,
+      index,
     );
-    page.imagePrompt = prompt;
+    panel.imagePrompt = prompt;
     this.persist();
     try {
       await navigator.clipboard.writeText(prompt);
-    } catch { /* clipboard blocked — prompt is still stored on the page */ }
-    this.copiedPageId.set(page.id);
-    setTimeout(() => { if (this.copiedPageId() === page.id) this.copiedPageId.set(null); }, 1800);
+    } catch { /* clipboard blocked — prompt is still stored on the panel */ }
+    this.copiedPanelId.set(panel.id);
+    setTimeout(() => { if (this.copiedPanelId() === panel.id) this.copiedPanelId.set(null); }, 1800);
+  }
+
+  // ── Character reference art (locks each character's look across all panels) ──
+  async copyCharacterPrompt(c: Character) {
+    const prompt = this.prompts.buildCharacterPortraitPrompt(c, this.style());
+    try {
+      await navigator.clipboard.writeText(prompt);
+    } catch { /* clipboard blocked */ }
+    this.copiedCharId.set(c.id);
+    setTimeout(() => { if (this.copiedCharId() === c.id) this.copiedCharId.set(null); }, 1800);
+  }
+  async onCharacterReference(event: Event, c: Character) {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    c.referenceImageRef = await this.putReplacing(c.referenceImageRef, file);
+    this.persist();
+    await this.refreshThumbs();
+  }
+  async removeCharacterReference(c: Character) {
+    if (c.referenceImageRef) await this.storage.deleteImage(c.referenceImageRef);
+    c.referenceImageRef = undefined;
+    this.persist();
+    await this.refreshThumbs();
   }
 
   // ── Preview ────────────────────────────────────────────────────────────────
@@ -386,6 +603,7 @@ export class Creator implements OnInit {
       idea: this.draft.idea,
       author: this.draft.author,
       coverImageRef: this.draft.coverImageRef,
+      backCoverImageRef: this.draft.backCoverImageRef,
       characters: this.draft.characters,
       chapters: [chapter],
       createdAt: 0,
@@ -405,55 +623,24 @@ export class Creator implements OnInit {
     };
   }
 
-  // ── Publish ────────────────────────────────────────────────────────────────
-  canPublish(): boolean {
-    if (!this.draft.pages.some((p) => !!p.imageRef)) return false;
-    if (this.assembleMode() === 'new') return this.draft.title.trim().length > 0;
-    return !!this.targetBookId;
+  // ── Finish ──────────────────────────────────────────────────────────────────
+  /** A title is all that's required to move a draft off the "Draft" state. */
+  canFinish(): boolean {
+    return this.draft.title.trim().length > 0;
   }
 
-  async publish() {
-    if (!this.canPublish() || this.publishing()) return;
+  /** Draft → finished book: flips it off "draft" and opens it in the reader. */
+  async finishDraft() {
+    if (!this.canFinish() || this.publishing()) return;
     this.publishing.set(true);
-    const now = timestamp();
-    const chapter = this.buildChapter();
-
-    if (this.assembleMode() === 'new') {
-      const book: ComicBook = {
-        id: newId('book'),
-        title: this.draft.title.trim(),
-        idea: this.draft.idea.trim(),
-        author: this.draft.author.trim() || undefined,
-        coverImageRef: this.draft.coverImageRef ?? this.draft.pages.find((p) => p.imageRef)?.imageRef,
-        characters: this.draft.characters,
-        chapters: [chapter],
-        createdAt: now,
-        updatedAt: now,
-      };
-      await this.library.save(book);
-      this.finish(book.id);
-    } else {
-      const target = await this.library.get(this.targetBookId);
-      if (!target || target.readonly) { this.publishing.set(false); return; }
-      // Merge any newly described characters into the existing book.
-      const known = new Set(target.characters.map((c) => c.name.trim().toLowerCase()));
-      for (const c of this.draft.characters) {
-        if (c.name.trim() && !known.has(c.name.trim().toLowerCase())) target.characters.push(c);
-      }
-      target.chapters.push(chapter);
-      target.updatedAt = now;
-      await this.library.save(target);
-      this.finish(target.id);
-    }
+    this.isDraftBook.set(false);
+    await this.library.save(this.buildBookFromDraft());
+    this.router.navigate(['/read', this.bookId]);
   }
 
-  private finish(bookId: string) {
-    clearDraft();
-    this.router.navigate(['/read', bookId]);
-  }
-
-  onModeChange(mode: AssembleMode) {
-    this.assembleMode.set(mode);
+  /** Editing a finished book autosaves continuously, so "Done" just leaves. */
+  done() {
+    this.router.navigate(['/']);
   }
 }
 

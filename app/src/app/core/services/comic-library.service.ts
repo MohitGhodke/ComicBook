@@ -1,5 +1,7 @@
 import { Injectable, inject } from '@angular/core';
-import { ComicBook, ReaderPage } from '../models/comic.model';
+import { ComicBook, ReaderPage, ReaderPanel } from '../models/comic.model';
+import { migratePage } from '../models/layout';
+import { cleanDialogue } from '../util/text';
 import { SEED_COMIC } from '../seed/seed-comic';
 import { StorageService } from './storage.service';
 
@@ -14,13 +16,13 @@ export class ComicLibraryService {
 
   private readonly seeds: ComicBook[] = [SEED_COMIC];
 
-  /** All books: bundled samples first, then the user's, newest-updated first. */
+  /** All books (drafts included): user's newest first, samples last. */
   async getAll(): Promise<ComicBook[]> {
     const user = await this.storage.listBooks();
-    return [...this.seeds, ...user];
+    return [...user, ...this.seeds];
   }
 
-  /** Only the user's editable books (used as add-chapter targets). */
+  /** Only the user's editable books. */
   async getUserBooks(): Promise<ComicBook[]> {
     return this.storage.listBooks();
   }
@@ -46,14 +48,20 @@ export class ComicLibraryService {
     await this.storage.deleteBook(id);
   }
 
-  /** Every image reference a book holds (cover, back cover, and all pages). */
+  /** Every image reference a book holds (cover, back cover, and all panels). */
   private imageRefs(book: ComicBook) {
     const refs = [];
     if (book.coverImageRef) refs.push(book.coverImageRef);
     if (book.backCoverImageRef) refs.push(book.backCoverImageRef);
+    for (const c of book.characters ?? []) {
+      if (c.referenceImageRef) refs.push(c.referenceImageRef);
+    }
     for (const chapter of book.chapters) {
       for (const page of chapter.pages) {
-        if (page.imageRef) refs.push(page.imageRef);
+        if (page.imageRef) refs.push(page.imageRef); // legacy
+        for (const panel of page.panels ?? []) {
+          if (panel.imageRef) refs.push(panel.imageRef);
+        }
       }
     }
     return refs;
@@ -66,41 +74,53 @@ export class ComicLibraryService {
 
   /**
    * Flatten cover -> every chapter's pages -> back cover into resolved
-   * ReaderPages. Pages without artwork yet are skipped so the flipbook always
-   * gets valid image sources.
+   * ReaderPages. A page is included once it has at least one panel with
+   * artwork; panels without art are skipped so the layout only shows real
+   * frames.
    */
   async toReaderPages(book: ComicBook): Promise<ReaderPage[]> {
     const out: ReaderPage[] = [];
 
     if (book.coverImageRef) {
       out.push({
-        src: await this.storage.resolveUrl(book.coverImageRef),
-        alt: book.title,
         isCover: true,
         isBack: false,
+        alt: book.title,
+        coverSrc: await this.storage.resolveUrl(book.coverImageRef),
       });
     }
 
     let n = 0;
     for (const chapter of book.chapters) {
-      for (const page of chapter.pages) {
-        if (!page.imageRef) continue;
+      for (const raw of chapter.pages) {
+        const page = migratePage(raw);
+        const panels: ReaderPanel[] = [];
+        for (const panel of page.panels ?? []) {
+          if (!panel.imageRef) continue;
+          panels.push({
+            src: await this.storage.resolveUrl(panel.imageRef),
+            dialogue: cleanDialogue(panel.dialogue),
+            dialogueKind: panel.dialogueKind ?? 'speech',
+          });
+        }
+        if (panels.length === 0) continue; // nothing to render yet
         n++;
         out.push({
-          src: await this.storage.resolveUrl(page.imageRef),
-          alt: page.caption || `Page ${n}`,
           isCover: false,
           isBack: false,
+          alt: `Page ${n}`,
+          layout: page.layout,
+          panels,
         });
       }
     }
 
     if (book.backCoverImageRef) {
       out.push({
-        src: await this.storage.resolveUrl(book.backCoverImageRef),
-        alt: 'Back cover',
         isCover: true,
         isBack: true,
+        alt: 'Back cover',
+        coverSrc: await this.storage.resolveUrl(book.backCoverImageRef),
       });
     }
 

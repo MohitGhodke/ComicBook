@@ -51,7 +51,9 @@
 
 /* ── Pages ── */
 .book-scene .page { background: #fff; position: relative; }
-.book-scene .page img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; -webkit-user-drag: none; }
+/* Cover images fit whole (contain); interior panel images use the shared
+   .panel styles (cover). Scoping to .page-cover avoids clobbering panels. */
+.book-scene .page-cover img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; -webkit-user-drag: none; }
 
 .book-scene .page::before,
 .book-scene .page::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
@@ -63,6 +65,12 @@
 .book-scene .page.--right::after { background: linear-gradient(to left, rgba(0,0,0,0) 90%, rgba(0,0,0,0.07) 96%, rgba(0,0,0,0.20) 100%); }
 .book-scene .page-cover.--left::after { background: linear-gradient(to right, rgba(0,0,0,0) 88%, rgba(0,0,0,0.10) 95%, rgba(0,0,0,0.28) 100%); }
 .book-scene .page-cover.--right::after { background: linear-gradient(to left, rgba(0,0,0,0) 88%, rgba(0,0,0,0.10) 95%, rgba(0,0,0,0.28) 100%); }
+
+/* Panel composition itself is styled globally (styles.scss) so the reader and
+   the live preview share it. Panelized pages draw their own frames, so suppress
+   the heavy page border here. */
+.book-scene .page.has-panels::before,
+.book-scene .page.has-panels::after { display: none; }
 
 /* ── Nav ── */
 .book-scene .book-nav { position: relative; display: flex; align-items: center; gap: 1.6rem; flex-shrink: 0; z-index: 10; }

@@ -107,17 +107,19 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
     }
   }
 
-  // ── Preload images (detect aspect ratio), then build the book ──────────────
+  // ── Preload every image (covers + panels), then build the book ─────────────
   private preloadAndInit() {
-    const srcs = this.pages.map((p) => p.src).filter(Boolean);
+    const srcs: string[] = [];
+    for (const p of this.pages) {
+      if (p.coverSrc) srcs.push(p.coverSrc);
+      for (const panel of p.panels ?? []) if (panel.src) srcs.push(panel.src);
+    }
     if (srcs.length === 0) {
-      this.loading.set(false);
+      this.zone.run(() => { this.initPageFlip(0); this.loading.set(false); });
       return;
     }
     this.loading.set(true);
     let remaining = srcs.length;
-    const firstInterior = this.pages.find((p) => !p.isCover)?.src;
-
     const done = () => {
       if (--remaining <= 0) {
         this.zone.run(() => {
@@ -128,12 +130,7 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
     };
     srcs.forEach((src) => {
       const img = new Image();
-      img.onload = () => {
-        if (src === firstInterior || (!firstInterior && this.pages[0]?.src === src)) {
-          this.pageRatio = img.naturalHeight / img.naturalWidth;
-        }
-        done();
-      };
+      img.onload = done;
       img.onerror = done;
       img.src = src;
     });
@@ -164,10 +161,36 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
       // Covers are rigid boards (hard); interior leaves fold (soft). Hard pages
       // don't reveal a blank back when turned. StPageFlip reads data-density.
       div.dataset['density'] = p.isCover ? 'hard' : 'soft';
-      const img = document.createElement('img');
-      img.src = p.src;
-      img.alt = p.alt;
-      div.appendChild(img);
+
+      if (p.isCover) {
+        const img = document.createElement('img');
+        img.src = p.coverSrc || '';
+        img.alt = p.alt;
+        div.appendChild(img);
+      } else {
+        // Interior page: the app composes a framed panel layout.
+        const layout = p.layout || 'splash';
+        if (layout !== 'splash') div.classList.add('has-panels');
+        const grid = document.createElement('div');
+        grid.className = 'panel-grid layout-' + layout;
+        (p.panels || []).forEach((panel) => {
+          const fig = document.createElement('figure');
+          fig.className = 'panel';
+          const img = document.createElement('img');
+          img.src = panel.src;
+          img.alt = '';
+          fig.appendChild(img);
+          if (panel.dialogue) {
+            const bubble = document.createElement('div');
+            const kind = panel.dialogueKind && panel.dialogueKind !== 'speech' ? ' ' + panel.dialogueKind : '';
+            bubble.className = 'bubble' + kind;
+            bubble.textContent = panel.dialogue;
+            fig.appendChild(bubble);
+          }
+          grid.appendChild(fig);
+        });
+        div.appendChild(grid);
+      }
       book.appendChild(div);
     });
     host.appendChild(book);
