@@ -6,6 +6,15 @@
   </header>
 
   <section class="block">
+    <h2>Appearance</h2>
+    <p class="muted sub">Light or dark, applied everywhere. Saved on this device.</p>
+    <div class="theme-toggle" role="radiogroup" aria-label="Theme">
+      <button type="button" class="theme-opt" role="radio" [attr.aria-checked]="theme() === 'light'" [class.selected]="theme() === 'light'" (click)="chooseTheme('light')">Light</button>
+      <button type="button" class="theme-opt" role="radio" [attr.aria-checked]="theme() === 'dark'" [class.selected]="theme() === 'dark'" (click)="chooseTheme('dark')">Dark</button>
+    </div>
+  </section>
+
+  <section class="block">
     <h2>Default art style</h2>
     <p class="muted sub">The look every new comic starts with. Each image prompt adapts to it — a Western-ink book and a manga book generate very different prompts. You can still change the style per comic.</p>
 

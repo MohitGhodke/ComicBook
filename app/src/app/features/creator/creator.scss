@@ -27,7 +27,7 @@
   color: var(--ink-faint); cursor: default; position: relative;
 }
 .step-item.clickable { cursor: pointer; }
-.step-item.clickable:hover { background: rgba(35, 32, 27, 0.04); }
+.step-item.clickable:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
 .step-item.active { color: var(--ink); }
 .step-item.done { color: var(--ink-soft); }
 .dot {
@@ -40,8 +40,11 @@
 .step-item.done .dot { background: var(--accent); border-color: var(--accent); color: #fff; }
 .step-label { font-size: 0.92rem; font-weight: 550; }
 
-/* ── Panel — full-height column: scroll region + pinned footer ── */
-.panel {
+/* ── Wizard panel — full-height column: scroll region + pinned footer.
+   Named distinctly from the global `.panel` (comic-page panel frame, always
+   white paper) in styles.scss — sharing that name here would leak its
+   hardcoded white background onto the editor chrome. ── */
+.wizard-panel {
   display: flex; flex-direction: column;
   width: 100%;
   height: 100%;
@@ -259,7 +262,7 @@
 
 /* ── Preview overlay ── */
 .preview-overlay { position: fixed; inset: 0; z-index: 100; background: #fff; }
-.back-fab { position: fixed; top: 1rem; left: 1rem; z-index: 120; background: rgba(255,255,255,0.92); box-shadow: var(--shadow); }
+.back-fab { position: fixed; top: 1rem; left: 1rem; z-index: 120; background: color-mix(in srgb, var(--card) 92%, transparent); box-shadow: var(--shadow); }
 
 @media (max-width: 720px) {
   .creator { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }

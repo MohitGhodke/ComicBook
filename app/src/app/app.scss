@@ -1,0 +1,25 @@
+.settings-fab {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 200;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--card) 90%, transparent);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.settings-fab:hover { color: var(--accent); border-color: var(--accent); }
+.settings-fab:active { transform: scale(0.94); }
+.settings-fab.active { color: var(--accent); }

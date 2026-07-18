@@ -4,11 +4,13 @@ import { RouterLink } from '@angular/router';
 import { StyleConfig } from '../../core/services/style.config';
 import { AiConfig } from '../../core/services/ai/ai.config';
 import { ART_STYLES } from '../../core/style/art-styles';
+import { ThemeConfig } from '../../core/services/theme.config';
 
 /**
- * App settings. Right now: the DEFAULT art style for new comics (every image
- * prompt adapts to the comic's style) and the on-device AI server address.
- * Each setting is persisted to localStorage via its config service.
+ * App settings: light/dark appearance, the DEFAULT art style for new comics
+ * (every image prompt adapts to the comic's style), and the on-device AI
+ * server address. Each setting is persisted to localStorage via its own
+ * config service.
  */
 @Component({
   selector: 'app-settings',
@@ -19,14 +21,20 @@ import { ART_STYLES } from '../../core/style/art-styles';
 export class Settings {
   private styleConfig = inject(StyleConfig);
   private aiConfig = inject(AiConfig);
+  private themeConfig = inject(ThemeConfig);
 
   readonly styles = ART_STYLES;
   readonly defaultStyleId = this.styleConfig.defaultStyleId;
+  readonly theme = this.themeConfig.theme;
 
   aiUrl = this.aiConfig.baseUrl;
 
   chooseStyle(id: string) {
     this.styleConfig.setDefaultStyle(id);
+  }
+
+  chooseTheme(theme: 'light' | 'dark') {
+    this.themeConfig.setTheme(theme);
   }
 
   saveAiUrl() {

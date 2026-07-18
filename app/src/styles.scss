@@ -15,6 +15,13 @@
   --accent-ink: #ffffff;
   --focus:      #5a4be0;
 
+  /* Fixed ink/line/faint for the rendered comic page — panels and bubbles are
+     always white paper regardless of app theme, so their text/borders must
+     stay dark in both themes too (unlike --ink/--line-2, which flip). */
+  --page-ink:   #16181f;
+  --page-line:  #d2d6e3;
+  --page-faint: #888ea1;
+
   --radius:     14px;
   --radius-sm:  9px;
   --shadow:     0 1px 2px rgba(22, 24, 31, 0.05), 0 8px 24px rgba(22, 24, 31, 0.07);
@@ -24,7 +31,31 @@
   --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
+/* Dark palette — same cool-neutral system, inverted. The rendered comic page
+   (panel art, bubbles) stays literal white paper in both themes; only app
+   chrome repaints here. */
+:root[data-theme='dark'] {
+  --paper:      #131419;
+  --paper-2:    #1b1c24;
+  --card:       #1c1d26;
+  --ink:        #eceef4;
+  --ink-soft:   #a6abbd;
+  --ink-faint:  #6c7186;
+  --line:       #26272f;
+  --line-2:     #34353f;
+  --accent:     #8b7bf0;
+  --accent-rgb: 139, 123, 240;
+  --accent-ink: #ffffff;
+  --focus:      #8b7bf0;
+
+  --shadow:     0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg:  0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
 * { box-sizing: border-box; }
+
+html { color-scheme: light; }
+html[data-theme='dark'] { color-scheme: dark; }
 
 html, body {
   margin: 0;
@@ -38,6 +69,7 @@ body {
   background: var(--paper);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 h1, h2, h3 {
@@ -116,7 +148,7 @@ a { color: inherit; }
   position: relative;
   margin: 0;
   overflow: hidden;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--page-line);
   border-radius: 3px;
   background: #fff;
 }
@@ -143,8 +175,8 @@ a { color: inherit; }
   left: 7%; bottom: 9%;
   max-width: 70%;
   background: #fff;
-  color: var(--ink);
-  border: 1px solid var(--ink);
+  color: var(--page-ink);
+  border: 1px solid var(--page-ink);
   border-radius: 0.85em;
   padding: 0.3em 0.55em;
   font-family: var(--font-body);
@@ -160,8 +192,8 @@ a { color: inherit; }
   left: 20%; bottom: -0.42em;
   width: 0.62em; height: 0.62em;
   background: #fff;
-  border-right: 1px solid var(--ink);
-  border-bottom: 1px solid var(--ink);
+  border-right: 1px solid var(--page-ink);
+  border-bottom: 1px solid var(--page-ink);
   transform: rotate(45deg);
 }
 
@@ -175,7 +207,7 @@ a { color: inherit; }
   content: '';
   position: absolute;
   background: #fff;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--page-ink);
   border-radius: 50%;
   transform: none;
 }
@@ -195,6 +227,6 @@ a { color: inherit; }
 .panel .panel-empty {
   position: absolute; inset: 0;
   display: grid; place-items: center;
-  color: var(--ink-faint);
+  color: var(--page-faint);
   font-size: 3.5cqi;
 }

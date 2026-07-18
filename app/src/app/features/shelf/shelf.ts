@@ -57,10 +57,6 @@ export class Shelf implements OnInit {
     this.router.navigate(['/create']);
   }
 
-  settings() {
-    this.router.navigate(['/settings']);
-  }
-
   edit(event: Event, book: ComicBook) {
     event.stopPropagation();
     this.router.navigate(['/create', book.id]); // edit = the create wizard, pre-loaded
