@@ -21,13 +21,10 @@
 .book-scene .book-host,
 .book-scene .book-nav { pointer-events: auto; }
 
-/* Lift the book off the backdrop with a box-shadow — NOT filter: drop-shadow.
-   A `filter` on this element (StPageFlip's .stf__parent) forces the whole 3D
-   subtree to render flattened, which breaks the page fold (flat "reflection"
-   artifact + blank adjacent page during a drag). box-shadow paints without
-   flattening descendants, so the 3D flip stays intact. StPageFlip's own
-   drawShadow handles the per-page shadow during a flip. */
-.book-scene #book { box-shadow: 0 16px 34px rgba(60, 40, 20, 0.26); }
+/* Same drop-shadow as the reference site: it follows the real rendered page
+   shapes, so a mid-flip page casts a believable shadow (a box-shadow would
+   stay a static rectangle while the page folds). */
+.book-scene #book { filter: drop-shadow(0 14px 26px rgba(60, 40, 20, 0.22)); }
 
 /* ── Loader ── */
 .book-scene .book-loader {
@@ -50,7 +47,15 @@
 @keyframes loader-paging { 10% { transform: rotateZ(0deg); } 100% { transform: rotateZ(-180deg); } }
 
 /* ── Pages ── */
-.book-scene .page { background: #fff; position: relative; }
+/* SPECIFICITY TRAP: StPageFlip's mid-flip draw() sets display/size/transform
+   inline but takes `position: absolute` from its injected `.stf__item` rule
+   (0-1-0). Any `.book-scene .page` (0-2-0) declaration of `position` beats it
+   and drops flipping pages into normal flow — pages render below the book and
+   go blank until the drop settles. Never set `position` on a selector that
+   matches a live `.stf__item`. Pre-init (before StPageFlip tags the element)
+   we still want a containing block for the frame overlays, hence :not(). */
+.book-scene .page { background: #fff; }
+.book-scene .page:not(.stf__item) { position: relative; }
 /* Cover images fit whole (contain); interior panel images use the shared
    .panel styles (cover). Scoping to .page-cover avoids clobbering panels. */
 .book-scene .page-cover img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; -webkit-user-drag: none; }
