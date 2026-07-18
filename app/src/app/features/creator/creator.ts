@@ -5,7 +5,7 @@ import { Reader } from '../reader/reader';
 import { ComicLibraryService } from '../../core/services/comic-library.service';
 import { StorageService } from '../../core/services/storage.service';
 import { PromptService } from '../../core/services/prompt.service';
-import { ComicAssistant, StoryContext, SuggestedCharacter, SuggestedPage } from '../../core/services/ai/comic-assistant';
+import { ComicAssistant, StoryContext, SuggestedCharacter, SuggestedPage, ShapedIdea } from '../../core/services/ai/comic-assistant';
 import { AiConfig } from '../../core/services/ai/ai.config';
 import { ComicBook, Character, Chapter, Page, ReaderPage } from '../../core/models/comic.model';
 import { newId } from '../../core/util/id';
@@ -35,8 +35,8 @@ export class Creator implements OnInit {
   private aiConfig = inject(AiConfig);
 
   readonly steps: StepDef[] = [
-    { key: 'idea', label: 'Idea', title: 'What is your comic about?',
-      teach: 'Every comic starts with one clear idea — the message or feeling you want a reader to walk away with. Name the book and describe that idea in a sentence or two.' },
+    { key: 'idea', label: 'Idea', title: 'Start with your idea',
+      teach: 'Begin with the idea — the message or feeling you want a reader to walk away with. Don\'t worry about the title yet: write your idea, then let AI refine it and suggest a good name for the book.' },
     { key: 'characters', label: 'Characters', title: 'Who is in your story?',
       teach: 'Readers connect with characters. Describe how each one looks and what they are like. Consistent descriptions keep the artwork coherent across pages.' },
     { key: 'interactions', label: 'Interactions', title: 'What happens between them?',
@@ -71,7 +71,7 @@ export class Creator implements OnInit {
 
   // Per-step AI state
   readonly ideaLoading = signal(false);
-  readonly ideaSuggestion = signal<string | null>(null);
+  readonly ideaSuggestion = signal<ShapedIdea | null>(null);
 
   readonly charLoading = signal(false);
   readonly charSuggestions = signal<SuggestedCharacter[] | null>(null);
@@ -152,16 +152,20 @@ export class Creator implements OnInit {
     this.aiAbort?.abort();
   }
 
-  // Step 1 — Idea
+  // Step 1 — Idea (entry point; AI refines the idea and suggests a title)
   async shapeIdea() {
     if (!this.draft.idea.trim()) return;
     this.ideaSuggestion.set(null);
     const shaped = await this.run(this.ideaLoading, (s) => this.assistant.shapeIdea(this.draft.idea, s));
-    if (shaped !== null) this.ideaSuggestion.set(shaped || '(the model returned nothing — try again)');
+    if (shaped !== null) this.ideaSuggestion.set(shaped);
   }
   acceptIdea() {
     const s = this.ideaSuggestion();
-    if (s) { this.draft.idea = s; this.persist(); }
+    if (s) {
+      if (s.logline) this.draft.idea = s.logline;
+      if (s.title) this.draft.title = s.title;
+      this.persist();
+    }
     this.ideaSuggestion.set(null);
   }
   dismissIdea() { this.ideaSuggestion.set(null); }
@@ -257,7 +261,7 @@ export class Creator implements OnInit {
   // ── Stepper ────────────────────────────────────────────────────────────────
   canAdvance(): boolean {
     switch (this.steps[this.step()].key) {
-      case 'idea': return this.draft.title.trim().length > 0 && this.draft.idea.trim().length > 0;
+      case 'idea': return this.draft.idea.trim().length > 0;
       case 'pages': return this.draft.pages.some((p) => !!p.imageRef);
       default: return true;
     }

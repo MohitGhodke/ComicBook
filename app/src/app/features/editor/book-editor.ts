@@ -243,7 +243,7 @@ export class BookEditor implements OnInit {
     if (!this.book?.idea.trim()) return;
     this.ideaSuggestion.set(null);
     const shaped = await this.run(this.ideaLoading, (s) => this.assistant.shapeIdea(this.book!.idea, s));
-    if (shaped !== null) this.ideaSuggestion.set(shaped || '(nothing returned — try again)');
+    if (shaped !== null) this.ideaSuggestion.set(shaped.logline || '(nothing returned — try again)');
   }
   acceptIdea() { const s = this.ideaSuggestion(); if (s && this.book) { this.book.idea = s; this.save(); } this.ideaSuggestion.set(null); }
   dismissIdea() { this.ideaSuggestion.set(null); }

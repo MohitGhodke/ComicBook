@@ -56,6 +56,7 @@
             ],
             "styles": [
               "node_modules/page-flip/src/Style/stPageFlip.css",
+              "public/fonts/fonts.css",
               "src/styles.scss"
             ]
           },

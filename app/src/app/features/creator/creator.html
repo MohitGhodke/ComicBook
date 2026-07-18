@@ -27,16 +27,11 @@
     <section class="panel-body">
       @switch (current().key) {
 
-        <!-- 1. IDEA -->
+        <!-- 1. IDEA (the starting point) -->
         @case ('idea') {
-          <label class="field">
-            <span class="field-label">Comic title</span>
-            <input class="input" [(ngModel)]="draft.title" (ngModelChange)="persist()"
-                   placeholder="e.g. The Last Lighthouse" />
-          </label>
           <div class="field">
             <div class="field-label-row">
-              <span class="field-label">The big idea</span>
+              <span class="field-label">Your idea <span class="faint">— start here</span></span>
               <div class="ai-controls">
                 @if (aiAvailable()) {
                   @if (aiModels().length > 1) {
@@ -48,8 +43,8 @@
                     <button class="btn small ai-btn" (click)="cancelAi()">Cancel</button>
                   } @else {
                     <button class="btn small ai-btn" (click)="shapeIdea()" [disabled]="!draft.idea.trim()"
-                            title="Shape this into a comic-ready logline using your local model">
-                      ✨ Help me shape this
+                            title="Refine your idea and suggest a title using your local model">
+                      ✨ Refine &amp; name it
                     </button>
                   }
                 } @else {
@@ -57,30 +52,41 @@
                 }
               </div>
             </div>
-            <textarea class="textarea" [(ngModel)]="draft.idea" (ngModelChange)="persist()"
-                      placeholder="What is this comic really about? What should a reader feel or learn?"></textarea>
-            <span class="hint faint">Tip: one clear sentence beats a vague paragraph.</span>
+            <textarea class="textarea tall" [(ngModel)]="draft.idea" (ngModelChange)="persist()"
+                      placeholder="Describe your idea in your own words — what happens, who it's about, what it's really about. The title can come later."></textarea>
+            <span class="hint faint">Just get the idea down. “✨ Refine &amp; name it” will polish it and propose a title.</span>
 
             @if (ideaLoading()) {
               <div class="ai-card ai-thinking">
-                <span class="ai-spinner"></span> Shaping your idea on-device…
+                <span class="ai-spinner"></span> Refining your idea on-device…
               </div>
             }
             @if (aiError()) {
               <div class="ai-card ai-error">{{ aiError() }}</div>
             }
-            @if (ideaSuggestion()) {
+            @if (ideaSuggestion(); as sug) {
               <div class="ai-card ai-suggestion">
-                <span class="ai-eyebrow">✨ Suggested logline</span>
-                <p class="ai-text">{{ ideaSuggestion() }}</p>
+                <span class="ai-eyebrow">✨ Suggestion</span>
+                @if (sug.title) {
+                  <p class="ai-suggest-title">Title: <strong>{{ sug.title }}</strong></p>
+                }
+                @if (sug.logline) {
+                  <p class="ai-text">{{ sug.logline }}</p>
+                }
                 <div class="ai-actions">
-                  <button class="btn btn--primary small" (click)="acceptIdea()">Use this</button>
+                  <button class="btn btn--primary small" (click)="acceptIdea()">Use idea &amp; title</button>
                   <button class="btn btn--ghost small" (click)="shapeIdea()">Try again</button>
                   <button class="btn btn--ghost small" (click)="dismissIdea()">Dismiss</button>
                 </div>
               </div>
             }
           </div>
+
+          <label class="field">
+            <span class="field-label">Comic title <span class="faint">(optional — AI can name it for you)</span></span>
+            <input class="input" [(ngModel)]="draft.title" (ngModelChange)="persist()"
+                   placeholder="Leave blank and refine your idea, or type your own" />
+          </label>
           <label class="field">
             <span class="field-label">Author <span class="faint">(optional)</span></span>
             <input class="input" [(ngModel)]="draft.author" (ngModelChange)="persist()" placeholder="Your name" />

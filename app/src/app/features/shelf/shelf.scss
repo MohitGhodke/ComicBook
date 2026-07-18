@@ -15,11 +15,6 @@
   margin-bottom: 2rem;
 }
 .brand { display: flex; align-items: center; gap: 0.9rem; }
-.brand-mark {
-  font-size: 1.9rem;
-  color: var(--accent);
-  line-height: 1;
-}
 .shelf-head h1 { font-size: 1.75rem; }
 .shelf-head p { margin: 0.2rem 0 0; font-size: 0.95rem; }
 
@@ -89,7 +84,7 @@
   background: transparent;
   transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
 }
-.tile--new:hover { border-color: var(--accent); color: var(--accent); background: rgba(181, 70, 47, 0.04); }
+.tile--new:hover { border-color: var(--accent); color: var(--accent); background: rgba(var(--accent-rgb), 0.04); }
 .plus { font-size: 2.4rem; line-height: 1; font-weight: 300; }
-.tile-new-label { font-weight: 600; font-family: var(--serif); font-size: 1.05rem; }
+.tile-new-label { font-weight: 600; font-family: var(--font-display); font-size: 1.05rem; }
 .tile-new-sub { font-size: 0.8rem; }

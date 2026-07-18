@@ -64,7 +64,7 @@
 .field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; min-height: 1.9rem; }
 .ai-controls { display: flex; align-items: center; gap: 0.5rem; }
 .ai-model {
-  font-family: var(--sans); font-size: 0.78rem; color: var(--ink-soft);
+  font-family: var(--font-body); font-size: 0.78rem; color: var(--ink-soft);
   border: 1px solid var(--line-2); border-radius: var(--radius-sm);
   padding: 0.25rem 0.4rem; background: var(--card); max-width: 190px;
 }
@@ -77,9 +77,11 @@
 }
 .ai-thinking { display: flex; align-items: center; gap: 0.6rem; color: var(--ink-soft); }
 .ai-error { border-color: #e2b3a6; background: #f8ece8; color: #8a3b28; }
-.ai-suggestion { border-color: var(--accent); background: rgba(181, 70, 47, 0.05); }
+.ai-suggestion { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
 .ai-eyebrow { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
-.ai-text { margin: 0.4rem 0 0.7rem; line-height: 1.55; color: var(--ink); font-family: var(--serif); }
+.ai-text { margin: 0.4rem 0 0.7rem; line-height: 1.55; color: var(--ink); font-family: var(--font-display); }
+.ai-suggest-title { margin: 0.4rem 0 0.2rem; font-size: 1.05rem; }
+.ai-suggest-title strong { font-family: var(--font-display); color: var(--accent); }
 .ai-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .ai-spinner {
@@ -103,7 +105,7 @@
   padding: 0.6rem 0; border-top: 1px solid var(--line);
 }
 .sugg-char-main { display: flex; flex-direction: column; gap: 0.1rem; }
-.sugg-char-main strong { font-family: var(--serif); }
+.sugg-char-main strong { font-family: var(--font-display); }
 
 .sugg-page {
   display: flex; gap: 0.7rem; padding: 0.55rem 0; border-top: 1px solid var(--line);
@@ -123,7 +125,7 @@
   padding: 1.1rem; display: flex; flex-direction: column; gap: 0.9rem; box-shadow: var(--shadow);
 }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
-.card-idx { font-family: var(--serif); font-weight: 600; color: var(--ink); }
+.card-idx { font-family: var(--font-display); font-weight: 600; color: var(--ink); }
 .small { font-size: 0.82rem; padding: 0.4rem 0.7rem; }
 .add-btn { align-self: flex-start; }
 
@@ -156,9 +158,9 @@
   transition: border-color 0.14s ease, background 0.14s ease;
 }
 .mode-card:hover:not(:disabled) { border-color: var(--ink-faint); }
-.mode-card.selected { border-color: var(--accent); background: rgba(181, 70, 47, 0.04); }
+.mode-card.selected { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.04); }
 .mode-card:disabled { opacity: 0.5; cursor: not-allowed; }
-.mode-title { font-family: var(--serif); font-weight: 600; font-size: 1.05rem; }
+.mode-title { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; }
 
 .cover-field { margin-top: 0.3rem; }
 .cover-row { display: flex; align-items: center; gap: 0.9rem; }

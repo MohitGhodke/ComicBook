@@ -1,25 +1,27 @@
 /* ── Design tokens ──────────────────────────────────────────────────────────
-   Minimalist, paper-and-ink palette. Serif for display, system sans for UI. */
+   Fresh cool-neutral palette with an iris/indigo accent. Display type is
+   Space Grotesk; body/UI is Inter (both self-hosted in /fonts). */
 :root {
-  --paper:      #f6f3ec;
-  --paper-2:    #efeae0;
+  --paper:      #f3f4f8;
+  --paper-2:    #e9ebf2;
   --card:       #ffffff;
-  --ink:        #23201b;
-  --ink-soft:   #5b554c;
-  --ink-faint:  #8c857a;
-  --line:       #e3ddd1;
-  --line-2:     #d3ccbd;
-  --accent:     #b5462f; /* warm brick red, matches the comic's cover tones */
+  --ink:        #16181f;
+  --ink-soft:   #545a6b;
+  --ink-faint:  #888ea1;
+  --line:       #e5e7f0;
+  --line-2:     #d2d6e3;
+  --accent:     #5a4be0;        /* iris / indigo-violet */
+  --accent-rgb: 90, 75, 224;    /* rgb of --accent, for translucent tints */
   --accent-ink: #ffffff;
-  --focus:      #3a6ea5;
+  --focus:      #5a4be0;
 
   --radius:     14px;
   --radius-sm:  9px;
-  --shadow:     0 1px 2px rgba(35, 32, 27, 0.06), 0 8px 24px rgba(35, 32, 27, 0.08);
-  --shadow-lg:  0 12px 40px rgba(35, 32, 27, 0.18);
+  --shadow:     0 1px 2px rgba(22, 24, 31, 0.05), 0 8px 24px rgba(22, 24, 31, 0.07);
+  --shadow-lg:  0 12px 40px rgba(22, 24, 31, 0.16);
 
-  --serif: Georgia, 'Times New Roman', serif;
-  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -31,7 +33,7 @@ html, body {
 }
 
 body {
-  font-family: var(--sans);
+  font-family: var(--font-body);
   color: var(--ink);
   background: var(--paper);
   -webkit-font-smoothing: antialiased;
@@ -39,9 +41,9 @@ body {
 }
 
 h1, h2, h3 {
-  font-family: var(--serif);
+  font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   margin: 0;
 }
 
@@ -49,7 +51,7 @@ a { color: inherit; }
 
 /* ── Shared UI primitives ───────────────────────────────────────────────── */
 .btn {
-  font-family: var(--sans);
+  font-family: var(--font-body);
   font-size: 0.95rem;
   font-weight: 550;
   border: 1px solid var(--line-2);
@@ -83,7 +85,7 @@ a { color: inherit; }
 }
 
 .input, .textarea {
-  font-family: var(--sans);
+  font-family: var(--font-body);
   font-size: 0.98rem;
   color: var(--ink);
   background: var(--card);

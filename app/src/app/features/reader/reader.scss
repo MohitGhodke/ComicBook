@@ -1,8 +1,8 @@
 /* Reader flipbook — ported from the original global stylesheet.
    Encapsulation is off, so everything is scoped under .book-scene. */
 .book-scene {
-  --accent: #c4956a;
-  --text-muted: #b0a396;
+  /* Inherit the app's iris accent; keep a cool muted grey for labels. */
+  --text-muted: #8a8fa0;
   --page-border: 5px;
 
   position: fixed;
@@ -14,7 +14,7 @@
   gap: 1rem;
   z-index: 1;
   pointer-events: none;
-  font-family: Georgia, 'Times New Roman', serif;
+  font-family: var(--font-body);
   background: #fff;
 }
 

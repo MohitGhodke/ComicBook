@@ -20,6 +20,25 @@ export interface SuggestedPage {
   dialogue: string;
 }
 
+export interface ShapedIdea {
+  /** A short, evocative comic title suggested from the idea. */
+  title: string;
+  /** The refined premise/logline. */
+  logline: string;
+}
+
+const SHAPED_IDEA_SCHEMA = {
+  name: 'shaped_idea',
+  schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      logline: { type: 'string' },
+    },
+    required: ['title', 'logline'],
+  },
+};
+
 const CHARACTERS_SCHEMA = {
   name: 'characters',
   schema: {
@@ -95,19 +114,31 @@ export class ComicAssistant {
     return this.ai.listModels();
   }
 
-  // ── Step 1: Idea ───────────────────────────────────────────────────────────
-  async shapeIdea(rough: string, signal?: AbortSignal): Promise<string> {
+  // ── Step 1: Idea (the entry point) ───────────────────────────────────────────
+  /**
+   * Refine a rough idea into a polished logline AND propose a comic title. The
+   * idea is the starting point — the user shouldn't have to name the book first;
+   * a good title falls out of a clear premise.
+   */
+  async shapeIdea(rough: string, signal?: AbortSignal): Promise<ShapedIdea> {
     const system =
-      'You are a comic book story editor. Rewrite the user\'s rough idea into a single vivid logline for a comic book. ' +
-      'In 2–3 sentences, make clear: the protagonist, what they want, the central conflict, the stakes, and the tone. ' +
-      'Write it as polished prose the author can drop straight into their comic. Return ONLY the logline — no preamble, no notes, no quotation marks.';
-    return this.ai.chat(
+      'You are a comic book story editor. From the user\'s rough idea, do two things: ' +
+      '(1) rewrite it into a single vivid logline — 2–3 sentences covering the protagonist, what they want, ' +
+      'the central conflict, the stakes, and the tone; and ' +
+      '(2) propose a short, evocative comic book title (2 to 5 words, no subtitle, no quotation marks). ' +
+      'Return ONLY a JSON object of the form {"title":"","logline":""}.';
+    const raw = await this.ai.chat(
       [
         { role: 'system', content: system },
         { role: 'user', content: rough.trim() },
       ],
-      { temperature: 0.7, maxTokens: 800, signal },
+      { temperature: 0.7, maxTokens: 800, schema: SHAPED_IDEA_SCHEMA, signal },
     );
+    const parsed = parseJsonObject(raw);
+    return {
+      title: String(parsed?.title ?? '').trim(),
+      logline: String(parsed?.logline ?? '').trim(),
+    };
   }
 
   // ── Step 2: Characters (inferred from the idea) ──────────────────────────────
