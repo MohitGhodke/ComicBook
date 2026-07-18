@@ -1,0 +1,84 @@
+import { Injectable } from '@angular/core';
+import { openDB, IDBPDatabase } from 'idb';
+import { ComicBook, ImageRef } from '../models/comic.model';
+import { StorageService } from './storage.service';
+
+const DB_NAME = 'comicbook';
+const DB_VERSION = 1;
+const BOOKS = 'books';
+const IMAGES = 'images';
+
+/**
+ * IndexedDB-backed implementation of {@link StorageService}.
+ *
+ * Books are stored as plain JSON in the `books` store; image blobs live in the
+ * `images` store keyed by a generated id. Resolved object URLs are cached so we
+ * don't leak a new URL on every render.
+ */
+@Injectable({ providedIn: 'root' })
+export class LocalStorageService extends StorageService {
+  private dbPromise: Promise<IDBPDatabase> | null = null;
+  private urlCache = new Map<string, string>();
+  private imageSeq = 0;
+
+  private db(): Promise<IDBPDatabase> {
+    if (!this.dbPromise) {
+      this.dbPromise = openDB(DB_NAME, DB_VERSION, {
+        upgrade(db) {
+          if (!db.objectStoreNames.contains(BOOKS)) {
+            db.createObjectStore(BOOKS, { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains(IMAGES)) {
+            db.createObjectStore(IMAGES);
+          }
+        },
+      });
+    }
+    return this.dbPromise;
+  }
+
+  async listBooks(): Promise<ComicBook[]> {
+    const db = await this.db();
+    const books = (await db.getAll(BOOKS)) as ComicBook[];
+    return books.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async getBook(id: string): Promise<ComicBook | undefined> {
+    const db = await this.db();
+    return (await db.get(BOOKS, id)) as ComicBook | undefined;
+  }
+
+  async saveBook(book: ComicBook): Promise<void> {
+    const db = await this.db();
+    await db.put(BOOKS, book);
+  }
+
+  async deleteBook(id: string): Promise<void> {
+    const db = await this.db();
+    await db.delete(BOOKS, id);
+  }
+
+  async putImage(blob: Blob): Promise<ImageRef> {
+    const db = await this.db();
+    // Time-free unique key (Date.now is unavailable in some sandboxes; a
+    // monotonic counter + random-free suffix is enough for local keys).
+    const key = `img_${this.imageSeq++}_${(await db.count(IMAGES))}`;
+    await db.put(IMAGES, blob, key);
+    return { kind: 'local', key };
+  }
+
+  async resolveUrl(ref: ImageRef): Promise<string> {
+    // Azure refs are already displayable URLs; asset refs are bundled paths.
+    if (ref.kind === 'azure' || ref.kind === 'asset') return ref.key;
+
+    const cached = this.urlCache.get(ref.key);
+    if (cached) return cached;
+
+    const db = await this.db();
+    const blob = (await db.get(IMAGES, ref.key)) as Blob | undefined;
+    if (!blob) return '';
+    const url = URL.createObjectURL(blob);
+    this.urlCache.set(ref.key, url);
+    return url;
+  }
+}

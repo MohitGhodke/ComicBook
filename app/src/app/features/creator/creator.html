@@ -1,0 +1,215 @@
+<div class="creator">
+  <!-- Stepper rail -->
+  <aside class="rail">
+    <button class="rail-back btn btn--ghost" (click)="exit()">← Shelf</button>
+    <ol class="steps">
+      @for (s of steps; track s.key; let i = $index) {
+        <li class="step-item"
+            [class.active]="i === step()"
+            [class.done]="i < step()"
+            [class.clickable]="i <= step()"
+            (click)="goToStep(i)">
+          <span class="dot">{{ i < step() ? '✓' : i + 1 }}</span>
+          <span class="step-label">{{ s.label }}</span>
+        </li>
+      }
+    </ol>
+  </aside>
+
+  <!-- Step body -->
+  <main class="panel">
+    <header class="panel-head">
+      <span class="eyebrow">Step {{ step() + 1 }} of {{ steps.length }}</span>
+      <h1>{{ current().title }}</h1>
+      <p class="teach">{{ current().teach }}</p>
+    </header>
+
+    <section class="panel-body">
+      @switch (current().key) {
+
+        <!-- 1. IDEA -->
+        @case ('idea') {
+          <label class="field">
+            <span class="field-label">Comic title</span>
+            <input class="input" [(ngModel)]="draft.title" (ngModelChange)="persist()"
+                   placeholder="e.g. The Last Lighthouse" />
+          </label>
+          <label class="field">
+            <span class="field-label">The big idea</span>
+            <textarea class="textarea" [(ngModel)]="draft.idea" (ngModelChange)="persist()"
+                      placeholder="What is this comic really about? What should a reader feel or learn?"></textarea>
+            <span class="hint faint">Tip: one clear sentence beats a vague paragraph.</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Author <span class="faint">(optional)</span></span>
+            <input class="input" [(ngModel)]="draft.author" (ngModelChange)="persist()" placeholder="Your name" />
+          </label>
+        }
+
+        <!-- 2. CHARACTERS -->
+        @case ('characters') {
+          @if (draft.characters.length === 0) {
+            <p class="empty faint">No characters yet. Add the people (or creatures) your story revolves around.</p>
+          }
+          @for (c of draft.characters; track c.id; let i = $index) {
+            <div class="card char-card">
+              <div class="card-head">
+                <span class="card-idx">Character {{ i + 1 }}</span>
+                <button class="btn btn--ghost small" (click)="removeCharacter(c)">Remove</button>
+              </div>
+              <label class="field">
+                <span class="field-label">Name</span>
+                <input class="input" [(ngModel)]="c.name" (ngModelChange)="persist()" placeholder="e.g. Mira" />
+              </label>
+              <label class="field">
+                <span class="field-label">Appearance</span>
+                <textarea class="textarea" [(ngModel)]="c.appearance" (ngModelChange)="persist()"
+                          placeholder="What do they look like? Age, clothing, distinctive features…"></textarea>
+              </label>
+              <label class="field">
+                <span class="field-label">Traits</span>
+                <textarea class="textarea" [(ngModel)]="c.traits" (ngModelChange)="persist()"
+                          placeholder="Personality, role, what drives them…"></textarea>
+              </label>
+            </div>
+          }
+          <button class="btn add-btn" (click)="addCharacter()">+ Add a character</button>
+        }
+
+        <!-- 3. INTERACTIONS -->
+        @case ('interactions') {
+          <label class="field">
+            <span class="field-label">Scene beats</span>
+            <textarea class="textarea tall" [(ngModel)]="draft.synopsis" (ngModelChange)="persist()"
+                      placeholder="Walk through what happens: how the characters meet, what they want, where they clash, how it turns out…"></textarea>
+            <span class="hint faint">This becomes the chapter's storyline and feeds the image prompts.</span>
+          </label>
+          @if (draft.characters.length) {
+            <div class="cast-reminder">
+              <span class="faint">Your cast:</span>
+              @for (c of draft.characters; track c.id) {
+                <span class="chip">{{ c.name || 'Unnamed' }}</span>
+              }
+            </div>
+          }
+        }
+
+        <!-- 4. PAGES -->
+        @case ('pages') {
+          @if (draft.pages.length === 0) {
+            <p class="empty faint">No pages yet. Add your first page to start building the comic.</p>
+          }
+          @for (p of draft.pages; track p.id; let i = $index) {
+            <div class="card page-card">
+              <div class="card-head">
+                <span class="card-idx">Page {{ i + 1 }}</span>
+                <div class="page-actions">
+                  <button class="btn btn--ghost small" (click)="movePage(p, -1)" [disabled]="i === 0" title="Move up">↑</button>
+                  <button class="btn btn--ghost small" (click)="movePage(p, 1)" [disabled]="i === draft.pages.length - 1" title="Move down">↓</button>
+                  <button class="btn btn--ghost small" (click)="removePage(p)">Remove</button>
+                </div>
+              </div>
+              <div class="page-grid">
+                <div class="page-art">
+                  @if (thumbs()[p.id]) {
+                    <img [src]="thumbs()[p.id]" alt="Page art" />
+                  } @else {
+                    <div class="art-empty faint">No image yet</div>
+                  }
+                  <div class="art-actions">
+                    <label class="btn small upload">
+                      {{ thumbs()[p.id] ? 'Replace image' : 'Upload image' }}
+                      <input type="file" accept="image/*" (change)="onPageImage($event, p)" hidden />
+                    </label>
+                    <button class="btn small" (click)="copyPrompt(p)">
+                      {{ copiedPageId() === p.id ? 'Copied ✓' : 'Copy image prompt' }}
+                    </button>
+                  </div>
+                </div>
+                <div class="page-text">
+                  <label class="field">
+                    <span class="field-label">Caption</span>
+                    <input class="input" [(ngModel)]="p.caption" (ngModelChange)="persist()" placeholder="Narration for this panel" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">Dialogue</span>
+                    <textarea class="textarea" [(ngModel)]="p.dialogue" (ngModelChange)="persist()" placeholder="What is said in this panel?"></textarea>
+                  </label>
+                </div>
+              </div>
+            </div>
+          }
+          <button class="btn add-btn" (click)="addPage()">+ Add a page</button>
+        }
+
+        <!-- 5. ASSEMBLE -->
+        @case ('assemble') {
+          <div class="mode-choice">
+            <button class="mode-card" [class.selected]="assembleMode() === 'new'" (click)="onModeChange('new')">
+              <span class="mode-title">Start a new book</span>
+              <span class="faint">Create a fresh comic on your shelf.</span>
+            </button>
+            <button class="mode-card" [class.selected]="assembleMode() === 'existing'"
+                    (click)="onModeChange('existing')" [disabled]="userBooks().length === 0">
+              <span class="mode-title">Add as a chapter</span>
+              <span class="faint">
+                {{ userBooks().length ? 'Append this to a book you already made.' : 'You have no books yet.' }}
+              </span>
+            </button>
+          </div>
+
+          @if (assembleMode() === 'new') {
+            <label class="field cover-field">
+              <span class="field-label">Cover image <span class="faint">(optional — first page is used if empty)</span></span>
+              <div class="cover-row">
+                @if (coverThumb) { <img class="cover-thumb" [src]="coverThumb" alt="Cover" /> }
+                <label class="btn small upload">
+                  {{ coverThumb ? 'Replace cover' : 'Upload cover' }}
+                  <input type="file" accept="image/*" (change)="onCoverImage($event)" hidden />
+                </label>
+              </div>
+            </label>
+          } @else {
+            <label class="field">
+              <span class="field-label">Choose a book</span>
+              <select class="input" [(ngModel)]="targetBookId">
+                <option value="" disabled>Select a book…</option>
+                @for (b of userBooks(); track b.id) {
+                  <option [value]="b.id">{{ b.title }}</option>
+                }
+              </select>
+            </label>
+          }
+
+          <div class="publish-row">
+            <button class="btn" (click)="openPreview()">Preview flipbook</button>
+            <button class="btn btn--primary" (click)="publish()" [disabled]="!canPublish() || publishing()">
+              {{ publishing() ? 'Publishing…' : 'Publish to shelf' }}
+            </button>
+          </div>
+          @if (!canPublish()) {
+            <p class="hint faint">Add at least one page with artwork
+              @if (assembleMode() === 'new') { and a title } @else { and pick a book }
+              to publish.</p>
+          }
+        }
+      }
+    </section>
+
+    <!-- Footer nav -->
+    <footer class="panel-foot">
+      <button class="btn btn--ghost" (click)="back()">{{ isFirst() ? 'Cancel' : 'Back' }}</button>
+      @if (!isLast()) {
+        <button class="btn btn--primary" (click)="next()" [disabled]="!canAdvance()">Continue →</button>
+      }
+    </footer>
+  </main>
+</div>
+
+<!-- Fullscreen preview overlay -->
+@if (previewing()) {
+  <div class="preview-overlay">
+    <button class="back-fab btn" (click)="closePreview()">← Back to editor</button>
+    <app-reader [pages]="previewPages()" />
+  </div>
+}

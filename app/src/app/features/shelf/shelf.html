@@ -1,0 +1,48 @@
+<div class="shelf">
+  <header class="shelf-head">
+    <div class="brand">
+      <span class="brand-mark">◪</span>
+      <div>
+        <h1>Comic Studio</h1>
+        <p class="muted">A shelf of comics — read one, or create your own.</p>
+      </div>
+    </div>
+    <button class="btn btn--primary" (click)="create()">+ Create a comic</button>
+  </header>
+
+  @if (loading()) {
+    <p class="faint loading">Loading your shelf…</p>
+  } @else {
+    <div class="grid">
+      <!-- Create tile, always first -->
+      <button class="tile tile--new" (click)="create()">
+        <span class="plus">+</span>
+        <span class="tile-new-label">Create a comic</span>
+        <span class="faint tile-new-sub">Idea → Characters → Pages</span>
+      </button>
+
+      @for (item of items(); track item.book.id) {
+        <article class="tile" (click)="open(item.book)">
+          <div class="cover">
+            @if (item.coverUrl) {
+              <img [src]="item.coverUrl" [alt]="item.book.title" />
+            } @else {
+              <div class="cover-empty faint">No cover yet</div>
+            }
+            @if (item.editable) {
+              <button class="del" title="Delete comic" (click)="remove($event, item.book)">✕</button>
+            } @else {
+              <span class="badge">Sample</span>
+            }
+          </div>
+          <div class="meta">
+            <h3 class="title">{{ item.book.title }}</h3>
+            <p class="muted sub">
+              {{ item.book.author || 'Unknown author' }} · {{ item.pages }} page{{ item.pages === 1 ? '' : 's' }}
+            </p>
+          </div>
+        </article>
+      }
+    </div>
+  }
+</div>

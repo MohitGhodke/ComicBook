@@ -1,0 +1,55 @@
+<div class="book-scene" [class.storyteller-active]="storytellerActive()" #scene>
+  @if (loading()) {
+    <div class="book-loader" role="status" aria-live="polite">
+      <div class="loader">
+        <div class="loader-book">
+          <div class="loader-page"></div>
+          <div class="loader-page loader-page2"></div>
+        </div>
+      </div>
+      <span class="book-loader-label">Loading…</span>
+    </div>
+  }
+
+  <!-- StPageFlip builds the book inside this host imperatively -->
+  <div class="book-host" #bookHost></div>
+
+  <!-- Storyteller mode: blocker intercepts StPageFlip mouse events -->
+  <div class="storyteller-blocker" (click)="toggleStoryteller()"></div>
+  <div class="storyteller-hint" aria-live="polite">Click anywhere to exit storyteller mode</div>
+  <div class="storyteller-overlay" [class.active]="storytellerActive()"></div>
+  <div class="storyteller-lens" [class.active]="storytellerActive()" aria-hidden="true">
+    <img class="storyteller-lens-img" #lensImg alt="" />
+  </div>
+
+  <nav class="book-nav">
+    <button class="nav-btn nav-btn--close" (click)="toFirst()" [disabled]="atStart()"
+            aria-label="Back to first page" title="Back to first page">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+        <path d="M2 7L8 2L14 7V14H10V10H6V14H2V7Z" />
+      </svg>
+    </button>
+    <button class="nav-btn" (click)="prev()" [disabled]="atStart()" aria-label="Previous page">&#8592;</button>
+    <button class="page-info-btn" [class.open]="jumpOpen()" (click)="toggleJump()"
+            aria-label="Jump to page" title="Jump to page">{{ pageInfo() }}</button>
+    <button class="nav-btn" (click)="next()" [disabled]="atEnd()" aria-label="Next page">&#8594;</button>
+
+    <div class="jump-panel" [class.open]="jumpOpen()">
+      <span class="jump-label">Jump to page</span>
+      <div class="jump-dots">
+        @for (i of dots(); track i) {
+          <button class="jump-dot" [class.active]="i === currentIndex()"
+                  (click)="goTo(i)" [attr.aria-label]="'Jump to page ' + (i + 1)">{{ i + 1 }}</button>
+        }
+      </div>
+    </div>
+
+    <button class="nav-btn storyteller-btn" [class.active]="storytellerActive()"
+            (click)="toggleStoryteller()" aria-label="Toggle storyteller mode" title="Storyteller mode">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+        <path d="M1 8C1 8 3.5 3 8 3C12.5 3 15 8 15 8C15 8 12.5 13 8 13C3.5 13 1 8 1 8Z" />
+        <circle cx="8" cy="8" r="2.2" />
+      </svg>
+    </button>
+  </nav>
+</div>

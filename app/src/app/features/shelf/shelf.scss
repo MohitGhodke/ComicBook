@@ -1,0 +1,106 @@
+:host { display: block; }
+
+.shelf {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+.shelf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 2rem;
+}
+.brand { display: flex; align-items: center; gap: 0.9rem; }
+.brand-mark {
+  font-size: 1.9rem;
+  color: var(--accent);
+  line-height: 1;
+}
+.shelf-head h1 { font-size: 1.75rem; }
+.shelf-head p { margin: 0.2rem 0 0; font-size: 0.95rem; }
+
+.loading { padding: 3rem 0; text-align: center; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1.5rem;
+}
+
+.tile {
+  text-align: left;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+}
+
+.cover {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--paper-2);
+  box-shadow: var(--shadow);
+  transition: transform 0.14s ease, box-shadow 0.14s ease;
+}
+.tile:hover .cover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cover-empty { display: grid; place-items: center; height: 100%; font-size: 0.9rem; }
+
+.badge {
+  position: absolute;
+  top: 0.6rem; left: 0.6rem;
+  background: rgba(35, 32, 27, 0.72);
+  color: #fff;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+}
+.del {
+  position: absolute;
+  top: 0.5rem; right: 0.5rem;
+  width: 1.7rem; height: 1.7rem;
+  border-radius: 50%;
+  border: none;
+  background: rgba(35, 32, 27, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.14s ease, background 0.14s ease;
+}
+.tile:hover .del { opacity: 1; }
+.del:hover { background: var(--accent); }
+
+.meta { padding: 0.7rem 0.15rem 0; }
+.title { font-size: 1.05rem; line-height: 1.25; }
+.sub { margin: 0.2rem 0 0; font-size: 0.85rem; }
+
+/* Create tile */
+.tile--new {
+  aspect-ratio: 3 / 4;
+  border: 1.5px dashed var(--line-2);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--ink-soft);
+  background: transparent;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+.tile--new:hover { border-color: var(--accent); color: var(--accent); background: rgba(181, 70, 47, 0.04); }
+.plus { font-size: 2.4rem; line-height: 1; font-weight: 300; }
+.tile-new-label { font-weight: 600; font-family: var(--serif); font-size: 1.05rem; }
+.tile-new-sub { font-size: 0.8rem; }

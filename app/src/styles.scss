@@ -1,0 +1,99 @@
+/* ── Design tokens ──────────────────────────────────────────────────────────
+   Minimalist, paper-and-ink palette. Serif for display, system sans for UI. */
+:root {
+  --paper:      #f6f3ec;
+  --paper-2:    #efeae0;
+  --card:       #ffffff;
+  --ink:        #23201b;
+  --ink-soft:   #5b554c;
+  --ink-faint:  #8c857a;
+  --line:       #e3ddd1;
+  --line-2:     #d3ccbd;
+  --accent:     #b5462f; /* warm brick red, matches the comic's cover tones */
+  --accent-ink: #ffffff;
+  --focus:      #3a6ea5;
+
+  --radius:     14px;
+  --radius-sm:  9px;
+  --shadow:     0 1px 2px rgba(35, 32, 27, 0.06), 0 8px 24px rgba(35, 32, 27, 0.08);
+  --shadow-lg:  0 12px 40px rgba(35, 32, 27, 0.18);
+
+  --serif: Georgia, 'Times New Roman', serif;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--sans);
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3 {
+  font-family: var(--serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+a { color: inherit; }
+
+/* ── Shared UI primitives ───────────────────────────────────────────────── */
+.btn {
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  font-weight: 550;
+  border: 1px solid var(--line-2);
+  background: var(--card);
+  color: var(--ink);
+  padding: 0.6rem 1.1rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.btn:hover { border-color: var(--ink-faint); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.btn--primary:hover { filter: brightness(1.05); border-color: var(--accent); }
+
+.btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.btn--ghost:hover { background: var(--paper-2); border-color: transparent; }
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.input, .textarea {
+  font-family: var(--sans);
+  font-size: 0.98rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 0.85rem;
+  width: 100%;
+}
+.textarea { resize: vertical; min-height: 5.5rem; line-height: 1.5; }
+.input:focus, .textarea:focus { border-color: var(--focus); outline: none; }
+
+.muted { color: var(--ink-soft); }
+.faint { color: var(--ink-faint); }

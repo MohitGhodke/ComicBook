@@ -1,0 +1,15 @@
+@if (ready() && notFound()) {
+  <div class="missing">
+    <p class="muted">That comic couldn't be found.</p>
+    <button class="btn" (click)="backToShelf()">← Back to shelf</button>
+  </div>
+} @else if (ready() && pages().length === 0) {
+  <div class="missing">
+    <h2>{{ title() }}</h2>
+    <p class="muted">This comic has no pages with artwork yet.</p>
+    <button class="btn" (click)="backToShelf()">← Back to shelf</button>
+  </div>
+} @else if (ready()) {
+  <button class="back-fab btn" (click)="backToShelf()" title="Back to shelf">← Shelf</button>
+  <app-reader [pages]="pages()" />
+}

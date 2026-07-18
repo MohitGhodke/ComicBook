@@ -1,0 +1,135 @@
+/* Reader flipbook — ported from the original global stylesheet.
+   Encapsulation is off, so everything is scoped under .book-scene. */
+.book-scene {
+  --accent: #c4956a;
+  --text-muted: #b0a396;
+  --page-border: 5px;
+
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  z-index: 1;
+  pointer-events: none;
+  font-family: Georgia, 'Times New Roman', serif;
+  background: #fff;
+}
+
+.book-scene .book-host,
+.book-scene .book-nav { pointer-events: auto; }
+
+.book-scene #book { filter: drop-shadow(0 14px 26px rgba(60, 40, 20, 0.22)); }
+
+/* ── Loader ── */
+.book-scene .book-loader {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1.4rem; background: #fff;
+}
+.book-scene .book-loader-label {
+  font-family: -apple-system, system-ui, sans-serif;
+  font-size: 0.78rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-muted);
+}
+.book-scene .loader { display: flex; align-items: center; justify-content: center; --book-color: var(--accent); --book-cover-color: #8a6240; }
+.book-scene .loader-book {
+  width: 150px; height: 13px; background-color: var(--book-color);
+  border-bottom: 2px solid var(--book-cover-color);
+  display: flex; align-items: flex-start; justify-content: flex-end; position: relative;
+}
+.book-scene .loader-page { width: 50%; height: 2px; background-color: var(--book-color); animation: loader-paging 0.7s ease-out infinite; transform-origin: left; }
+.book-scene .loader-page2 { animation-duration: 0.8s; position: absolute; }
+@keyframes loader-paging { 10% { transform: rotateZ(0deg); } 100% { transform: rotateZ(-180deg); } }
+
+/* ── Pages ── */
+.book-scene .page { background: #fff; position: relative; }
+.book-scene .page img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; -webkit-user-drag: none; }
+
+.book-scene .page::before,
+.book-scene .page::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
+.book-scene .page::before { border: var(--page-border) solid #000; z-index: 4; }
+.book-scene .page.--left::before { right: calc(var(--page-border) * -0.5); border-right-width: calc(var(--page-border) * 0.75); }
+.book-scene .page.--right::before { left: calc(var(--page-border) * -0.5); border-left-width: calc(var(--page-border) * 0.75); }
+.book-scene .page::after { z-index: 3; }
+.book-scene .page.--left::after { background: linear-gradient(to right, rgba(0,0,0,0) 90%, rgba(0,0,0,0.07) 96%, rgba(0,0,0,0.20) 100%); }
+.book-scene .page.--right::after { background: linear-gradient(to left, rgba(0,0,0,0) 90%, rgba(0,0,0,0.07) 96%, rgba(0,0,0,0.20) 100%); }
+.book-scene .page-cover.--left::after { background: linear-gradient(to right, rgba(0,0,0,0) 88%, rgba(0,0,0,0.10) 95%, rgba(0,0,0,0.28) 100%); }
+.book-scene .page-cover.--right::after { background: linear-gradient(to left, rgba(0,0,0,0) 88%, rgba(0,0,0,0.10) 95%, rgba(0,0,0,0.28) 100%); }
+
+/* ── Nav ── */
+.book-scene .book-nav { position: relative; display: flex; align-items: center; gap: 1.6rem; flex-shrink: 0; z-index: 10; }
+@keyframes btn-pop { 0% { transform: scale(1); } 35% { transform: scale(0.82); } 65% { transform: scale(1.12); } 100% { transform: scale(1); } }
+.book-scene .nav-btn {
+  width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--accent);
+  background: transparent; color: var(--accent); font-size: 1.1rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: background 0.18s ease, color 0.18s ease;
+}
+.book-scene .nav-btn:hover { background: var(--accent); color: #fff; }
+.book-scene .nav-btn:disabled { opacity: 0.25; cursor: default; }
+.book-scene .nav-btn:disabled:hover { background: transparent; color: var(--accent); }
+.book-scene .nav-btn--close { font-size: 0.9rem; }
+
+.book-scene .page-info-btn {
+  font-size: 0.8rem; letter-spacing: 0.08em; color: var(--text-muted); min-width: 56px; text-align: center;
+  font-family: -apple-system, system-ui, sans-serif; background: transparent; border: none; cursor: pointer;
+  padding: 4px 6px; border-radius: 6px; transition: color 0.15s ease; position: relative;
+}
+.book-scene .page-info-btn::after { content: ''; position: absolute; left: 50%; bottom: -2px; width: 0; height: 1.5px; background: var(--accent); transform: translateX(-50%); transition: width 0.2s ease; }
+.book-scene .page-info-btn:hover, .book-scene .page-info-btn.open { color: var(--accent); }
+.book-scene .page-info-btn:hover::after, .book-scene .page-info-btn.open::after { width: 80%; }
+
+/* ── Jump popover ── */
+@keyframes panel-up { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+.book-scene .jump-panel {
+  position: absolute; bottom: calc(100% + 14px); left: 50%; transform: translateX(-50%);
+  background: rgba(255,255,255,0.97); border: 1.5px solid var(--accent); border-radius: 14px;
+  padding: 12px 16px 14px; box-shadow: 0 8px 28px rgba(0,0,0,0.13); white-space: nowrap; z-index: 20; display: none;
+}
+.book-scene .jump-panel.open { display: block; animation: panel-up 0.2s ease forwards; }
+.book-scene .jump-panel::after { content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 8px solid var(--accent); }
+.book-scene .jump-label { display: block; font-size: 0.68rem; letter-spacing: 0.1em; color: var(--text-muted); text-align: center; margin-bottom: 10px; font-family: -apple-system, system-ui, sans-serif; text-transform: uppercase; }
+.book-scene .jump-dots { display: flex; gap: 6px; flex-wrap: wrap; max-width: 340px; justify-content: center; }
+.book-scene .jump-dot {
+  width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--accent); background: transparent; color: var(--accent);
+  font-size: 0.72rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease; font-family: -apple-system, system-ui, sans-serif;
+}
+.book-scene .jump-dot:hover { background: var(--accent); color: #fff; transform: scale(1.15); }
+.book-scene .jump-dot.active { background: var(--accent); color: #fff; }
+
+/* ── Storyteller ── */
+.book-scene .storyteller-btn { margin-left: 0.5rem; }
+.book-scene .storyteller-btn.active { background: var(--accent); color: #fff; box-shadow: 0 0 12px rgba(196, 149, 106, 0.5); }
+.book-scene .storyteller-blocker { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.book-scene.storyteller-active .storyteller-blocker { pointer-events: auto; }
+.book-scene .storyteller-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 5; background: rgba(0,0,0,0.38); opacity: 0; transition: opacity 0.5s ease; }
+.book-scene .storyteller-overlay.active { opacity: 1; }
+
+@keyframes lens-breathe {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(210,160,60,0.35), 0 0 0 4px rgba(255,215,120,0.12), 0 0 30px 8px rgba(200,140,40,0.12), 0 10px 50px rgba(0,0,0,0.7); }
+  50% { box-shadow: 0 0 0 2px rgba(255,200,80,0.6), 0 0 0 5px rgba(255,215,120,0.18), 0 0 40px 12px rgba(200,140,40,0.22), 0 10px 50px rgba(0,0,0,0.7); }
+}
+.book-scene .storyteller-lens {
+  position: fixed; left: var(--cx, 50%); top: var(--cy, 50%); width: 550px; height: 550px;
+  transform: translate(-50%, -50%); border-radius: 50%; overflow: hidden; pointer-events: none; z-index: 6;
+  opacity: 0; transition: opacity 0.45s ease; background: #111;
+  box-shadow: 0 0 0 2px rgba(210,160,60,0.35), 0 10px 50px rgba(0,0,0,0.7);
+}
+.book-scene .storyteller-lens.active { opacity: 1; animation: lens-breathe 3s ease-in-out infinite; }
+.book-scene .storyteller-lens-img { position: absolute; display: none; filter: contrast(1.12) saturate(1.2) brightness(1.05); image-rendering: auto; }
+.book-scene .storyteller-lens::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%; pointer-events: none; z-index: 1;
+  background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.10) 0%, transparent 55%), radial-gradient(circle at 68% 72%, rgba(0,0,0,0.10) 0%, transparent 50%);
+}
+.book-scene.storyteller-active .book-nav { visibility: hidden; }
+.book-scene.storyteller-active .book-host { cursor: none; }
+
+.book-scene .storyteller-hint {
+  position: absolute; bottom: 2rem; left: 0; right: 0; text-align: center; pointer-events: none; z-index: 8;
+  opacity: 0; transition: opacity 0.45s ease; font-family: -apple-system, system-ui, sans-serif; font-size: 0.82rem;
+  letter-spacing: 0.06em; color: #111; background: rgba(255,255,255,0.88); padding: 7px 20px; border-radius: 999px;
+  width: fit-content; margin: 0 auto; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+}
+.book-scene.storyteller-active .storyteller-hint { opacity: 1; }
