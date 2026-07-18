@@ -75,12 +75,14 @@ export class Creator implements OnInit {
 
   readonly charLoading = signal(false);
   readonly charSuggestions = signal<SuggestedCharacter[] | null>(null);
+  readonly charProgress = signal<{ done: number; total: number } | null>(null);
 
   readonly beatsLoading = signal(false);
   readonly beatsSuggestion = signal<string | null>(null);
 
   readonly storyLoading = signal(false);
   readonly storySuggestions = signal<SuggestedPage[] | null>(null);
+  readonly storyProgress = signal<{ done: number; total: number } | null>(null);
   storyboardCount = 6;
 
   readonly coverLoading = signal(false);
@@ -174,8 +176,20 @@ export class Creator implements OnInit {
   async suggestCharacters() {
     if (!this.draft.idea.trim()) return;
     this.charSuggestions.set(null);
-    const list = await this.run(this.charLoading, (s) => this.assistant.suggestCharacters(this.storyContext(), s));
-    if (list !== null) this.charSuggestions.set(list);
+    this.charProgress.set(null);
+    const list = await this.run(this.charLoading, (s) =>
+      this.assistant.suggestCharacters(
+        this.storyContext(),
+        (done, total, latest) => {
+          this.charProgress.set({ done, total });
+          this.charSuggestions.update((cur) => [...(cur ?? []), latest]);
+        },
+        s,
+      ),
+    );
+    this.charProgress.set(null);
+    // Empty plan → show the "nothing usable" card; partials from a cancel stay.
+    if (list !== null && this.charSuggestions() === null) this.charSuggestions.set(list);
   }
   addSuggestedCharacter(c: SuggestedCharacter) {
     this.draft.characters.push({ id: newId('char'), name: c.name, appearance: c.appearance, traits: c.traits });
@@ -207,9 +221,21 @@ export class Creator implements OnInit {
   // Step 4 — Pages (storyboard)
   async storyboard() {
     this.storySuggestions.set(null);
+    this.storyProgress.set(null);
     const count = Math.min(Math.max(this.storyboardCount || 6, 1), 12);
-    const pages = await this.run(this.storyLoading, (s) => this.assistant.storyboardPages(this.storyContext(), count, s));
-    if (pages !== null) this.storySuggestions.set(pages);
+    const pages = await this.run(this.storyLoading, (s) =>
+      this.assistant.storyboardPages(
+        this.storyContext(),
+        count,
+        (done, total, latest) => {
+          this.storyProgress.set({ done, total });
+          this.storySuggestions.update((cur) => [...(cur ?? []), latest]);
+        },
+        s,
+      ),
+    );
+    this.storyProgress.set(null);
+    if (pages !== null && this.storySuggestions() === null) this.storySuggestions.set(pages);
   }
   addStoryboardPages() {
     for (const p of this.storySuggestions() ?? []) {
@@ -372,7 +398,10 @@ export class Creator implements OnInit {
       id: newId('chapter'),
       title: this.draft.title || 'Chapter',
       synopsis: this.draft.synopsis,
-      pages: this.draft.pages.filter((p) => !!p.imageRef),
+      // Keep EVERY page, even ones without artwork yet — their caption/dialogue/
+      // prompt are real content and must survive so they're editable later. The
+      // reader simply skips imageless pages when rendering.
+      pages: this.draft.pages,
     };
   }
 
@@ -395,7 +424,7 @@ export class Creator implements OnInit {
         title: this.draft.title.trim(),
         idea: this.draft.idea.trim(),
         author: this.draft.author.trim() || undefined,
-        coverImageRef: this.draft.coverImageRef ?? chapter.pages[0]?.imageRef,
+        coverImageRef: this.draft.coverImageRef ?? this.draft.pages.find((p) => p.imageRef)?.imageRef,
         characters: this.draft.characters,
         chapters: [chapter],
         createdAt: now,

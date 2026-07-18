@@ -162,6 +162,12 @@
           @else { <button class="btn small ai-btn" (click)="suggestCharacters()" [disabled]="!book.idea.trim()">✨ Suggest</button> }
         }
       </div>
+      @if (charLoading()) {
+        <div class="ai-card ai-thinking"><span class="ai-spinner"></span>
+          @if (charProgress(); as p) { Designing character {{ p.done }} of {{ p.total }}… }
+          @else { Reading your story… }
+        </div>
+      }
       @if (charSuggestions()) {
         <div class="ai-card ai-suggestion">
           <div class="ai-sugg-head">
@@ -224,7 +230,10 @@
 
           @if (aiAvailable()) {
             <div class="ai-bar">
-              @if (storyLoading()) { <span class="ai-inline"><span class="ai-spinner"></span> Storyboarding…</span><button class="btn small btn--ghost" (click)="cancelAi()">Cancel</button> }
+              @if (storyLoading()) { <span class="ai-inline"><span class="ai-spinner"></span>
+                  @if (storyProgress(); as p) { Writing page {{ p.done }} of {{ p.total }}… }
+                  @else { Outlining pages… }
+                </span><button class="btn small btn--ghost" (click)="cancelAi()">Cancel</button> }
               @else {
                 <button class="btn small ai-btn" (click)="storyboard(ch)" [disabled]="!book.idea.trim()">✨ Storyboard</button>
                 <label class="story-count faint">pages <input class="input tiny" type="number" min="1" max="12" [(ngModel)]="storyboardCount" /></label>

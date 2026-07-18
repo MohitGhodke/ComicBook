@@ -98,7 +98,10 @@
           <div class="ai-bar">
             @if (aiAvailable()) {
               @if (charLoading()) {
-                <span class="ai-inline"><span class="ai-spinner"></span> Imagining your cast on-device…</span>
+                <span class="ai-inline"><span class="ai-spinner"></span>
+                  @if (charProgress(); as p) { Designing character {{ p.done }} of {{ p.total }}… }
+                  @else { Reading your idea… }
+                </span>
                 <button class="btn small btn--ghost" (click)="cancelAi()">Cancel</button>
               } @else {
                 <button class="btn small ai-btn" (click)="suggestCharacters()" [disabled]="!draft.idea.trim()"
@@ -212,7 +215,10 @@
           <div class="ai-bar">
             @if (aiAvailable()) {
               @if (storyLoading()) {
-                <span class="ai-inline"><span class="ai-spinner"></span> Storyboarding your pages on-device…</span>
+                <span class="ai-inline"><span class="ai-spinner"></span>
+                  @if (storyProgress(); as p) { Writing page {{ p.done }} of {{ p.total }}… }
+                  @else { Outlining your pages… }
+                </span>
                 <button class="btn small btn--ghost" (click)="cancelAi()">Cancel</button>
               } @else {
                 <button class="btn small ai-btn" (click)="storyboard()" [disabled]="!draft.idea.trim()"

@@ -15,6 +15,18 @@ export interface SuggestedCharacter {
   traits: string;
 }
 
+/** One slot from the character plan: who they are, before full design. */
+export interface CharacterPlan {
+  name: string;
+  role: string;
+}
+
+/** Progress callback for the batched (plan → expand) character flow. */
+export type CharacterProgress = (done: number, total: number, latest: SuggestedCharacter) => void;
+
+/** Progress callback for the batched (plan → expand) storyboard flow. */
+export type PageProgress = (done: number, total: number, latest: SuggestedPage) => void;
+
 export interface SuggestedPage {
   caption: string;
   dialogue: string;
@@ -39,8 +51,8 @@ const SHAPED_IDEA_SCHEMA = {
   },
 };
 
-const CHARACTERS_SCHEMA = {
-  name: 'characters',
+const CHARACTER_PLAN_SCHEMA = {
+  name: 'character_plan',
   schema: {
     type: 'object',
     properties: {
@@ -50,14 +62,26 @@ const CHARACTERS_SCHEMA = {
           type: 'object',
           properties: {
             name: { type: 'string' },
-            appearance: { type: 'string' },
-            traits: { type: 'string' },
+            role: { type: 'string' },
           },
-          required: ['name', 'appearance', 'traits'],
+          required: ['name', 'role'],
         },
       },
     },
     required: ['characters'],
+  },
+};
+
+const ONE_CHARACTER_SCHEMA = {
+  name: 'character',
+  schema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string' },
+      appearance: { type: 'string' },
+      traits: { type: 'string' },
+    },
+    required: ['name', 'appearance', 'traits'],
   },
 };
 
@@ -72,8 +96,8 @@ const REVIEW_SCHEMA = {
   },
 };
 
-const PAGES_SCHEMA = {
-  name: 'pages',
+const STORYBOARD_PLAN_SCHEMA = {
+  name: 'storyboard_plan',
   schema: {
     type: 'object',
     properties: {
@@ -81,15 +105,24 @@ const PAGES_SCHEMA = {
         type: 'array',
         items: {
           type: 'object',
-          properties: {
-            caption: { type: 'string' },
-            dialogue: { type: 'string' },
-          },
-          required: ['caption', 'dialogue'],
+          properties: { summary: { type: 'string' } },
+          required: ['summary'],
         },
       },
     },
     required: ['pages'],
+  },
+};
+
+const ONE_PAGE_SCHEMA = {
+  name: 'page',
+  schema: {
+    type: 'object',
+    properties: {
+      caption: { type: 'string' },
+      dialogue: { type: 'string' },
+    },
+    required: ['caption', 'dialogue'],
   },
 };
 
@@ -141,35 +174,80 @@ export class ComicAssistant {
     };
   }
 
-  // ── Step 2: Characters (inferred from the idea) ──────────────────────────────
-  async suggestCharacters(ctx: StoryContext, signal?: AbortSignal): Promise<SuggestedCharacter[]> {
+  // ── Step 2: Characters — batched "plan → expand" for small-model reliability ──
+  /**
+   * Suggest characters in two phases so a small local model stays accurate:
+   *   1. plan — decide WHO is in the story and HOW MANY (honours explicit counts
+   *      in the idea, e.g. "six colleagues" → six).
+   *   2. expand — one focused call per character for a rich, detailed design.
+   * `onProgress` fires after each character so the UI can fill them in one by one.
+   */
+  async suggestCharacters(
+    ctx: StoryContext,
+    onProgress?: CharacterProgress,
+    signal?: AbortSignal,
+  ): Promise<SuggestedCharacter[]> {
+    const plan = await this.planCharacters(ctx, signal);
+    const out: SuggestedCharacter[] = [];
+    for (let i = 0; i < plan.length; i++) {
+      const full = await this.describeCharacter(ctx, plan[i], signal);
+      out.push(full);
+      onProgress?.(i + 1, plan.length, full);
+    }
+    return out;
+  }
+
+  /** Phase 1: who's in the story and how many — small, reliable output. */
+  async planCharacters(ctx: StoryContext, signal?: AbortSignal): Promise<CharacterPlan[]> {
     const existing = ctx.characters.map((c) => c.name).filter(Boolean);
     const system =
-      'You are a comic book story editor. From the story context, propose the key characters the story needs — ' +
-      'including any character implied by the idea (for example, a person the idea says did something). ' +
-      'For each character give: name, appearance (one vivid sentence), and traits (one sentence on personality and role). ' +
-      'Propose 2 to 4 characters. Do NOT repeat characters that are already listed. ' +
-      'Return ONLY a JSON object of the form {"characters":[{"name":"","appearance":"","traits":""}]}.';
+      'You are a comic book story editor. Read the idea and list the characters the story needs — ' +
+      'including anyone implied by it (for example, a person the idea says did something). ' +
+      'IMPORTANT: if the idea states or clearly implies a specific number of characters (e.g. "six colleagues", ' +
+      '"a pair of rivals", "three sisters"), return EXACTLY that many. Otherwise pick a sensible number (2 to 6). ' +
+      'For each, give a name and a short one-line role. Do NOT repeat characters already listed. ' +
+      'Return ONLY a JSON object of the form {"characters":[{"name":"","role":""}]}.';
     const user =
       this.contextBlock(ctx) +
       (existing.length ? `\n\nAlready created (do not repeat): ${existing.join(', ')}` : '') +
-      '\n\nReturn the characters JSON.';
+      '\n\nList the characters as JSON.';
     const raw = await this.ai.chat(
       [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      { temperature: 0.7, maxTokens: 1600, schema: CHARACTERS_SCHEMA, signal },
+      { temperature: 0.6, maxTokens: 900, schema: CHARACTER_PLAN_SCHEMA, signal },
     );
     const parsed = parseJsonObject(raw);
     const list = Array.isArray(parsed?.characters) ? parsed.characters : [];
     return list
-      .map((c: any) => ({
-        name: String(c?.name ?? '').trim(),
-        appearance: String(c?.appearance ?? '').trim(),
-        traits: String(c?.traits ?? '').trim(),
-      }))
-      .filter((c: SuggestedCharacter) => c.name.length > 0);
+      .map((c: any) => ({ name: String(c?.name ?? '').trim(), role: String(c?.role ?? '').trim() }))
+      .filter((c: CharacterPlan) => c.name.length > 0);
+  }
+
+  /** Phase 2: fully design ONE character — a focused call for higher quality. */
+  async describeCharacter(ctx: StoryContext, plan: CharacterPlan, signal?: AbortSignal): Promise<SuggestedCharacter> {
+    const system =
+      'You are a comic book character designer. Given the story and ONE character, write a rich design for that ' +
+      'character: appearance (one vivid sentence — age, build, clothing, distinctive features) and traits ' +
+      '(one sentence — personality, role, and what drives them). Keep them consistent with the story. ' +
+      'Return ONLY a JSON object of the form {"name":"","appearance":"","traits":""}.';
+    const user =
+      this.contextBlock(ctx) +
+      `\n\nCHARACTER: ${plan.name}${plan.role ? ` — ${plan.role}` : ''}\n\nDesign this character as JSON.`;
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.7, maxTokens: 700, schema: ONE_CHARACTER_SCHEMA, signal },
+    );
+    const parsed = parseJsonObject(raw);
+    return {
+      name: String(parsed?.name ?? '').trim() || plan.name,
+      appearance: String(parsed?.appearance ?? '').trim(),
+      traits: String(parsed?.traits ?? '').trim() || plan.role,
+    };
   }
 
   // ── Step 3: Interactions (from idea + characters) ────────────────────────────
@@ -188,28 +266,69 @@ export class ComicAssistant {
     );
   }
 
-  // ── Step 4: Pages (storyboard from everything) ───────────────────────────────
-  async storyboardPages(ctx: StoryContext, count: number, signal?: AbortSignal): Promise<SuggestedPage[]> {
+  // ── Step 4: Pages — batched "plan → expand", same as characters ──────────────
+  /**
+   * Storyboard in two phases so a small model stays coherent over many pages:
+   *   1. plan — outline the arc as `count` one-line page beats.
+   *   2. expand — one focused call per page for its caption + dialogue.
+   * `onProgress` streams pages so the UI fills them in one at a time.
+   */
+  async storyboardPages(
+    ctx: StoryContext,
+    count: number,
+    onProgress?: PageProgress,
+    signal?: AbortSignal,
+  ): Promise<SuggestedPage[]> {
+    const beats = await this.planStoryboard(ctx, count, signal);
+    const out: SuggestedPage[] = [];
+    for (let i = 0; i < beats.length; i++) {
+      const page = await this.writePage(ctx, beats[i], i + 1, beats.length, signal);
+      out.push(page);
+      onProgress?.(i + 1, beats.length, page);
+    }
+    return out;
+  }
+
+  /** Phase 1: outline the arc as one-line page beats. */
+  async planStoryboard(ctx: StoryContext, count: number, signal?: AbortSignal): Promise<string[]> {
     const system =
-      `You are a comic book writer. Turn the story into an ordered sequence of ${count} comic pages that flow one to the next ` +
-      'and tell a complete mini-arc consistent with the characters and beats. ' +
-      'For each page give a short caption (the narration for that panel) and dialogue (what a character says on that page; may be an empty string). ' +
-      'Return ONLY a JSON object of the form {"pages":[{"caption":"","dialogue":""}]}.';
+      `You are a comic book writer. Outline an ordered sequence of exactly ${count} comic pages that together ` +
+      'tell a complete mini-arc, consistent with the idea, characters and beats. For each page give a one-line ' +
+      `summary of what happens on it. Return ONLY {"pages":[{"summary":""}]} with exactly ${count} items.`;
     const raw = await this.ai.chat(
       [
         { role: 'system', content: system },
-        { role: 'user', content: this.contextBlock(ctx) + `\n\nWrite ${count} pages as JSON.` },
+        { role: 'user', content: this.contextBlock(ctx) + `\n\nOutline ${count} pages as JSON.` },
       ],
-      { temperature: 0.7, maxTokens: 2600, schema: PAGES_SCHEMA, signal },
+      { temperature: 0.7, maxTokens: 1200, schema: STORYBOARD_PLAN_SCHEMA, signal },
     );
     const parsed = parseJsonObject(raw);
     const list = Array.isArray(parsed?.pages) ? parsed.pages : [];
-    return list
-      .map((p: any) => ({
-        caption: String(p?.caption ?? '').trim(),
-        dialogue: String(p?.dialogue ?? '').trim(),
-      }))
-      .filter((p: SuggestedPage) => p.caption.length > 0 || p.dialogue.length > 0);
+    return list.map((p: any) => String(p?.summary ?? '').trim()).filter((s: string) => s.length > 0);
+  }
+
+  /** Phase 2: write ONE page's caption + dialogue from its beat — focused call. */
+  async writePage(ctx: StoryContext, summary: string, index: number, total: number, signal?: AbortSignal): Promise<SuggestedPage> {
+    const system =
+      'You are a comic book writer. Write ONE page of the comic: a short caption (the narration for the panel) ' +
+      'and dialogue (what a character says on this page; may be an empty string). Stay consistent with the story ' +
+      'and this page\'s beat, and match the pacing of its position in the sequence. ' +
+      'Return ONLY a JSON object of the form {"caption":"","dialogue":""}.';
+    const user =
+      this.contextBlock(ctx) +
+      `\n\nThis is page ${index} of ${total}. Page beat: ${summary}\n\nWrite this page as JSON.`;
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.7, maxTokens: 700, schema: ONE_PAGE_SCHEMA, signal },
+    );
+    const parsed = parseJsonObject(raw);
+    return {
+      caption: String(parsed?.caption ?? '').trim() || summary,
+      dialogue: String(parsed?.dialogue ?? '').trim(),
+    };
   }
 
   // ── Assemble: cover art prompt ───────────────────────────────────────────────

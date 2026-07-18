@@ -50,6 +50,7 @@ export class BookEditor implements OnInit {
   readonly ideaSuggestion = signal<string | null>(null);
   readonly charLoading = signal(false);
   readonly charSuggestions = signal<SuggestedCharacter[] | null>(null);
+  readonly charProgress = signal<{ done: number; total: number } | null>(null);
   readonly frontCoverLoading = signal(false);
   readonly frontCoverPrompt = signal<string | null>(null);
   readonly frontCoverCopied = signal(false);
@@ -60,6 +61,7 @@ export class BookEditor implements OnInit {
   readonly beatsSuggestion = signal<{ chapterId: string; text: string } | null>(null);
   readonly storyLoading = signal(false);
   readonly storySuggestions = signal<{ chapterId: string; pages: SuggestedPage[] } | null>(null);
+  readonly storyProgress = signal<{ done: number; total: number } | null>(null);
   storyboardCount = 4;
 
   // Review
@@ -250,8 +252,19 @@ export class BookEditor implements OnInit {
 
   async suggestCharacters() {
     this.charSuggestions.set(null);
-    const list = await this.run(this.charLoading, (s) => this.assistant.suggestCharacters(this.storyContext(), s));
-    if (list !== null) this.charSuggestions.set(list);
+    this.charProgress.set(null);
+    const list = await this.run(this.charLoading, (s) =>
+      this.assistant.suggestCharacters(
+        this.storyContext(),
+        (done, total, latest) => {
+          this.charProgress.set({ done, total });
+          this.charSuggestions.update((cur) => [...(cur ?? []), latest]);
+        },
+        s,
+      ),
+    );
+    this.charProgress.set(null);
+    if (list !== null && this.charSuggestions() === null) this.charSuggestions.set(list);
   }
   addSuggestedCharacter(c: SuggestedCharacter) {
     this.book?.characters.push({ id: newId('char'), name: c.name, appearance: c.appearance, traits: c.traits });
@@ -303,9 +316,24 @@ export class BookEditor implements OnInit {
 
   async storyboard(ch: Chapter) {
     this.storySuggestions.set(null);
+    this.storyProgress.set(null);
     const count = Math.min(Math.max(this.storyboardCount || 4, 1), 12);
-    const pages = await this.run(this.storyLoading, (s) => this.assistant.storyboardPages(this.storyContext(), count, s));
-    if (pages !== null) this.storySuggestions.set({ chapterId: ch.id, pages });
+    const pages = await this.run(this.storyLoading, (s) =>
+      this.assistant.storyboardPages(
+        this.storyContext(),
+        count,
+        (done, total, latest) => {
+          this.storyProgress.set({ done, total });
+          this.storySuggestions.update((cur) => {
+            const existing = cur?.chapterId === ch.id ? cur.pages : [];
+            return { chapterId: ch.id, pages: [...existing, latest] };
+          });
+        },
+        s,
+      ),
+    );
+    this.storyProgress.set(null);
+    if (pages !== null && this.storySuggestions() === null) this.storySuggestions.set({ chapterId: ch.id, pages });
   }
   addStoryboard(ch: Chapter) {
     const sb = this.storySuggestions();
