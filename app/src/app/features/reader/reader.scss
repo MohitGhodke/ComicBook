@@ -54,7 +54,7 @@
    go blank until the drop settles. Never set `position` on a selector that
    matches a live `.stf__item`. Pre-init (before StPageFlip tags the element)
    we still want a containing block for the frame overlays, hence :not(). */
-.book-scene .page { background: #fff; }
+.book-scene .page { background: var(--card); }
 .book-scene .page:not(.stf__item) { position: relative; }
 /* Cover images fit whole (contain); interior panel images use the shared
    .panel styles (cover). Scoping to .page-cover avoids clobbering panels. */

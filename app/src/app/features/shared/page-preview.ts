@@ -51,7 +51,7 @@ import { cleanDialogue } from '../../core/util/text';
       border-radius: 10px;
       overflow: hidden;
       box-shadow: 0 8px 30px rgba(22, 24, 31, 0.14);
-      background: #fff;
+      background: var(--card);
     }
     .pp-empty { height: 100%; display: grid; place-items: center; font-size: 0.9rem; }
     .panel.interactive { cursor: pointer; transition: outline-color 0.12s ease; outline: 2px solid transparent; outline-offset: -2px; }
