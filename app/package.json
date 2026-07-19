@@ -6,7 +6,10 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "eval": "playwright test",
+    "eval:selftest": "node e2e/eval/selftest.mjs",
+    "eval:report": "playwright show-report e2e/eval/playwright-report"
   },
   "prettier": {
     "printWidth": 100,
@@ -38,6 +41,7 @@
     "@angular/build": "^20.3.32",
     "@angular/cli": "^20.3.32",
     "@angular/compiler-cli": "^20.3.0",
+    "@playwright/test": "^1.49.0",
     "@types/jasmine": "~5.1.0",
     "jasmine-core": "~5.9.0",
     "karma": "~6.4.0",

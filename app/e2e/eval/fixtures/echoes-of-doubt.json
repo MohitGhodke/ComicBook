@@ -1,0 +1,67 @@
+{
+  "_note": "Golden regression fixture reconstructed from the actual 'Echoes of Doubt' run (the wizard screenshots + the three rendered comic pages). It captures a run where the thread broke: Commander Valerius and Sergeant Kael are defined in Step 2 but never named in the pages, beats 2 and 5 barely surface, and mystery concepts appear late with no early setup. The offline self-test asserts the evaluator flags exactly these gaps.",
+  "rawIdea": "Haunted by the loss of his family and seeking redemption, Elias, an emotionally scarred former soldier, infiltrates a secretive paramilitary group guarding a mystical relic. But when he gets close to proving their corruption, he discovers the devastating truth: the enemy isn't external—it's the person he trusted most, forcing him to confront not just the conspiracy, but his own broken loyalty and sense of reality.",
+  "title": "Echoes of Doubt",
+  "logline": "Haunted by the loss of his family and seeking redemption, Elias, an emotionally scarred former soldier, infiltrates a secretive paramilitary group guarding a mystical relic. When he gets close to proving their corruption, he discovers the enemy isn't external but the person he trusted most, forcing him to confront the conspiracy and his own broken loyalty and sense of reality.",
+  "characters": [
+    {
+      "name": "Elias",
+      "appearance": "A gaunt man in his late twenties with haunted, deep-set eyes and a worn military jacket.",
+      "traits": "Driven by a desperate need for redemption, Elias is cynical but deeply loyal."
+    },
+    {
+      "name": "Commander Valerius",
+      "appearance": "A towering figure with impeccably tailored black armor etched with glowing blue lines.",
+      "traits": "Valerius is a charismatic but ruthlessly pragmatic leader who maintains the illusion of protection."
+    },
+    {
+      "name": "Anya",
+      "appearance": "With striking raven hair braided with silver ribbons, she possesses an ethereal presence.",
+      "traits": "She presents herself as Elias's confidante and moral compass, using manufactured intimacy to manipulate him."
+    },
+    {
+      "name": "Sergeant Kael",
+      "appearance": "A gaunt man in impeccably maintained dark tactical gear with severe scarring.",
+      "traits": "He is a pragmatic skeptic who aids Elias out of professional duty rather than friendship."
+    }
+  ],
+  "beats": "1. The Outer Perimeter/Twilight: Elias executes his initial infiltration, posing as a damaged specialist seeking employment. He observes Commander Valerius managing the heavily armored perimeter guards while Sergeant Kael watches him with unconcealed skepticism. Elias uses minimal force to bypass early security checkpoints, establishing himself as an unpredictable element within the group's rigid structure.\n\n2. The Observation Post/Late Evening: Elias meets Anya in a quiet, secluded observation post overlooking the valley where the relic rests. She feigns concern for his exhaustion and uses manufactured intimacy to gather information. Meanwhile, Kael approaches Elias later that night, dropping encrypted data chips related to supply manifest discrepancies—a professional warning about Valerius's excessive resource consumption.\n\n3. The Restricted Vault Entrance/Deep Night: Guided by Anya's direction and Kael's warnings, Elias gains access to an area far beyond the guard routes. He finds physical evidence contradicting Valerius's stated mission—records indicating the relic isn't merely protected, but actively used for power generation, forcing Elias to realize the corruption is systemic.\n\n4. The Forgotten Sub-Level Tunnels/Pre-Dawn: Cornered by a patrol, Elias is separated from Kael and Anya and attempts to escape through ancient sub-level tunnels. It is here that Anya finally drops her facade, revealing devastating personal knowledge about his family's fate, twisting the conversation into a cold confirmation of betrayal.\n\n5. The Central Ritual Chamber/Sunrise: Valerius confronts Elias in the massive chamber housing the relic. Anya appears not as an accomplice, but as the primary architect of the conspiracy, revealing that their protection was always preparation for a controlled sacrifice. Elias uses his skills against Anya's emotional manipulation to expose their destructive agenda, culminating in a desperate fight for reality itself.",
+  "pages": [
+    {
+      "layout": "six",
+      "panels": [
+        { "dialogueKind": "speech", "dialogue": "Your skills are impressive; too subtle for mere wanderers.", "description": "Wide shot of a fortified checkpoint at dusk; a man in glowing blue armor watches Elias from a raised gantry." },
+        { "dialogueKind": "thought", "dialogue": "He moves like he expects us to fail.", "description": "Medium shot of Elias in his worn jacket walking a metal walkway, wary." },
+        { "dialogueKind": "speech", "dialogue": "I only seek what I need to survive here.", "description": "Two-shot of Elias beside an armored man on a rig platform at sunset." },
+        { "dialogueKind": "speech", "dialogue": "It must be exhausting seeing that much power all at once.", "description": "Anya, raven-haired with silver ribbons, gestures at a glittering city below as Elias looks on." },
+        { "dialogueKind": "speech", "dialogue": "The sight is impressive, but it does little to distract me.", "description": "Close-up of Elias and Anya at a wooden lookout over a lit valley at night." },
+        { "dialogueKind": "speech", "dialogue": "These records show discrepancies in recent supply shipments.", "description": "Elias holds a sheaf of records beside a stern man at the lantern-lit lookout." }
+      ]
+    },
+    {
+      "layout": "six",
+      "panels": [
+        { "dialogueKind": "narration", "dialogue": "This isn't about protection; it's about harnessing power.", "description": "Elias sweeps a flashlight across a rusted records room under a red alarm light." },
+        { "dialogueKind": "speech", "dialogue": "I need to know what they truly intend with this relic.", "description": "Close-up of Elias prying open a metal case with a tool." },
+        { "dialogueKind": "narration", "dialogue": "They're not guarding it— they're running a massive operation.", "description": "Elias crouches by heavy vault machinery, tense." },
+        { "dialogueKind": "speech", "dialogue": "Your desperate need for truth blinds you, Elias.", "description": "Anya corners Elias in a grimy pipe tunnel." },
+        { "dialogueKind": "speech", "dialogue": "We always knew your little games would end poorly.", "description": "Anya smirks in the dripping tunnel as Elias flees." },
+        { "dialogueKind": "speech", "dialogue": "The accident wasn't fate; it was calculated.", "description": "Sweating close-up of Elias, wide-eyed, Anya behind him in the tunnel." }
+      ]
+    },
+    {
+      "layout": "six",
+      "panels": [
+        { "dialogueKind": "speech", "dialogue": "It was never about protection, Elias. It was preparation.", "description": "In a golden arched vault, Anya points past Elias and an armored man to a glowing crystal relic." },
+        { "dialogueKind": "speech", "dialogue": "You used everything I cared for, didn't you?", "description": "Close-up of a horrified Elias, Anya calm beside him." },
+        { "dialogueKind": "speech", "dialogue": "Your loyalty was just a resource. And resources get spent.", "description": "Anya stands triumphant between glowing pillars." },
+        { "dialogueKind": "speech", "dialogue": "This place felt like it swallowed everything whole.", "description": "Daylight over vast ruins; Elias and a rugged soldier pick through rubble." },
+        { "dialogueKind": "speech", "dialogue": "It only ever consumed what it wasn't ready to let go of.", "description": "Two-shot of Elias and the soldier before a broken fortress wall." },
+        { "dialogueKind": "speech", "dialogue": "Maybe we start by finding something that can't be destroyed.", "description": "Close-up of Elias and the soldier facing each other amid the ruins under a blue sky." }
+      ]
+    }
+  ],
+  "model": "google/gemma-4-e4b (fixture)",
+  "baseUrl": "fixture://echoes-of-doubt",
+  "pageCount": 3
+}

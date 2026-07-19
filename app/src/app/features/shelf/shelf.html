@@ -11,9 +11,29 @@
     </div>
   </header>
 
+  @if (!loading() && items().length > 0) {
+    <div class="shelf-controls">
+      <input
+        class="input search"
+        type="search"
+        placeholder="Search by title or author…"
+        [(ngModel)]="query"
+        aria-label="Search comics"
+      />
+      <select class="input sort" [(ngModel)]="sortOrder" aria-label="Sort comics">
+        @for (opt of sortOptions; track opt.value) {
+          <option [value]="opt.value">{{ opt.label }}</option>
+        }
+      </select>
+    </div>
+  }
+
   @if (loading()) {
     <p class="faint loading">Loading your shelf…</p>
   } @else {
+    @if (items().length > 0 && visibleItems().length === 0) {
+      <p class="faint loading">No comics match "{{ query() }}".</p>
+    }
     <div class="grid">
       <!-- Create tile, always first -->
       <button class="tile tile--new" (click)="create()">
@@ -22,7 +42,7 @@
         <span class="faint tile-new-sub">Idea → Characters → Pages</span>
       </button>
 
-      @for (item of items(); track item.book.id) {
+      @for (item of visibleItems(); track item.book.id) {
         <article class="tile" (click)="open(item)">
           <div class="cover">
             @if (item.coverUrl) {

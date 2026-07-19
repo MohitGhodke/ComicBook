@@ -41,3 +41,9 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# E2E / continuity eval outputs
+/e2e/eval/reports
+/e2e/eval/playwright-report
+/test-results
+/playwright/.cache

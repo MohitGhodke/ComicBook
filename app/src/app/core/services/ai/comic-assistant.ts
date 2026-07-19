@@ -107,6 +107,45 @@ const REVIEW_SCHEMA = {
   },
 };
 
+/** One plant→payoff pair: something set up early so a later moment lands. */
+interface SetupPair {
+  plant: string;
+  payoff: string;
+}
+
+/** The dramatic architecture a chapter's beats must deliver (Step 3, pass A). */
+interface StorySpine {
+  want: string;
+  flaw: string;
+  dramaticQuestion: string;
+  climax: string;
+  resolution: string;
+  setups: SetupPair[];
+}
+
+const STORY_SPINE_SCHEMA = {
+  name: 'story_spine',
+  schema: {
+    type: 'object',
+    properties: {
+      want: { type: 'string' },
+      flaw: { type: 'string' },
+      dramaticQuestion: { type: 'string' },
+      climax: { type: 'string' },
+      resolution: { type: 'string' },
+      setups: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { plant: { type: 'string' }, payoff: { type: 'string' } },
+          required: ['plant', 'payoff'],
+        },
+      },
+    },
+    required: ['want', 'flaw', 'dramaticQuestion', 'climax', 'resolution', 'setups'],
+  },
+};
+
 const STORYBOARD_PLAN_SCHEMA = {
   name: 'storyboard_plan',
   schema: {
@@ -116,8 +155,11 @@ const STORYBOARD_PLAN_SCHEMA = {
         type: 'array',
         items: {
           type: 'object',
-          properties: { summary: { type: 'string' } },
-          required: ['summary'],
+          properties: {
+            summary: { type: 'string' },
+            characters: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['summary', 'characters'],
         },
       },
     },
@@ -153,6 +195,16 @@ interface PanelPlanSlot {
   beat: string;
   dialogue: string;
   dialogueKind: BubbleKind;
+}
+
+/**
+ * One planned page: its one-line summary plus the cast expected to appear on it.
+ * The characters list is what makes the "every character reaches a panel"
+ * guarantee possible — it flows from the storyboard plan into each page's script.
+ */
+interface PageBeat {
+  summary: string;
+  characters: string[];
 }
 
 /**
@@ -340,24 +392,99 @@ export class ComicAssistant {
     };
   }
 
-  // ── Step 3: Interactions (from idea + characters) ────────────────────────────
+  // ── Step 3: Interactions — structure-first so the beats have real craft ──────
+  /**
+   * Write the scene beats in two passes, because a good story is architecture the
+   * user can't supply and the model must:
+   *   A. {@link planStorySpine} — decide the dramatic structure FIRST: the
+   *      protagonist's want and flaw, the dramatic question, the climax, the
+   *      resolution, and the plant→payoff pairs (what must be set up early so the
+   *      ending lands).
+   *   B. {@link writeBeatsFromSpine} — write the beats FROM that spine, so every
+   *      payoff is planted earlier and emotional stakes are earned before they're
+   *      exploited. This is what makes "setup before payoff" hold.
+   */
   async draftInteractions(ctx: StoryContext, signal?: AbortSignal): Promise<string> {
+    const spine = await this.planStorySpine(ctx, signal);
+    return this.writeBeatsFromSpine(ctx, spine, signal);
+  }
+
+  /** Pass A — the dramatic architecture the beats must deliver. */
+  private async planStorySpine(ctx: StoryContext, signal?: AbortSignal): Promise<StorySpine> {
     const system =
-      'You are a comic book story editor. Using the idea and the characters, write the scene beats for this chapter: ' +
-      'how the characters meet and interact, what each wants, where they clash, and how it resolves. ' +
-      'Give 4 to 7 concrete beats, specific to THESE characters and this idea. Keep it tight and vivid.\n' +
-      'CRITICAL: beats are SCENES, not moments — the story must TRAVEL. Spread the beats across DIFFERENT locations ' +
-      'and times (start each beat by naming where/when), and cover the FULL scope of the idea: if it promises a ' +
-      'chase, a city, a journey or a deadline, those must appear as beats. NEVER compress the whole chapter into ' +
-      'one room or one continuous conversation — that makes every drawn page look identical.\n' +
-      'Return ONLY the beats as short prose or a short numbered list — no preamble.';
-    return this.ai.chat(
+      'You are a comic book STORY EDITOR. The writer has an idea and characters but needs YOU to supply the ' +
+      'dramatic craft. Before any scenes exist, define the story architecture: ' +
+      'want (what the protagonist is after), flaw (the inner wound or blind spot that makes it hard), ' +
+      'dramaticQuestion (the single suspense question the whole story answers), ' +
+      'climax (the peak turn that answers it), resolution (how it ends and what has CHANGED in the protagonist). ' +
+      'Then list 2 to 4 SETUPS: each is something PLANTED early so a later moment lands. For each, give the ' +
+      '"plant" (what the reader sees/learns early) and the "payoff" (the later moment it makes land). Any twist, ' +
+      'betrayal, or emotional blow in this story MUST have a setup here — nothing important may come from nowhere. ' +
+      'Return ONLY JSON matching the schema.';
+    const raw = await this.ai.chat(
       [
         { role: 'system', content: system },
-        { role: 'user', content: this.contextBlock(ctx) + '\n\nWrite the scene beats.' },
+        { role: 'user', content: this.contextBlock(ctx) + '\n\nDefine the story architecture as JSON.' },
       ],
-      { temperature: 0.75, maxTokens: 1200, signal },
+      { temperature: 0.6, maxTokens: 1200, schema: STORY_SPINE_SCHEMA, signal },
     );
+    const p = parseJsonObject(raw);
+    const str = (v: any) => String(v ?? '').trim();
+    return {
+      want: str(p?.want),
+      flaw: str(p?.flaw),
+      dramaticQuestion: str(p?.dramaticQuestion),
+      climax: str(p?.climax),
+      resolution: str(p?.resolution),
+      setups: Array.isArray(p?.setups)
+        ? p.setups.map((s: any) => ({ plant: str(s?.plant), payoff: str(s?.payoff) })).filter((s: SetupPair) => s.plant || s.payoff)
+        : [],
+    };
+  }
+
+  /** Pass B — write the beats FROM the spine, planting every payoff first. */
+  private async writeBeatsFromSpine(ctx: StoryContext, spine: StorySpine, signal?: AbortSignal): Promise<string> {
+    const arch = [
+      spine.want && `- Protagonist wants: ${spine.want}`,
+      spine.flaw && `- Inner flaw/wound: ${spine.flaw}`,
+      spine.dramaticQuestion && `- Dramatic question: ${spine.dramaticQuestion}`,
+      spine.climax && `- Climax: ${spine.climax}`,
+      spine.resolution && `- Resolution / what changes: ${spine.resolution}`,
+      spine.setups.length &&
+        `- Setups to PLANT early and PAY OFF later:\n${spine.setups
+          .map((s, i) => `   ${i + 1}. PLANT: ${s.plant}  →  PAYOFF: ${s.payoff}`)
+          .join('\n')}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const system =
+      'You are a comic book story editor writing the scene beats for one chapter, working from a story ' +
+      'architecture you were given. Write 4 to 7 concrete beats as a numbered list. CRAFT RULES (non-negotiable): ' +
+      '(1) the opening beat(s) establish the protagonist\'s normal world, their want and flaw, and PLANT every ' +
+      'listed setup — the reader must SEE each plant before its payoff; ' +
+      '(2) any emotional stake or loss must be ESTABLISHED in an early beat before a later beat exploits it; ' +
+      '(3) each beat is CAUSED by the one before it — rising tension, not a list of events; ' +
+      '(4) a late beat delivers the CLIMAX (the payoff of the dramatic question), and every payoff points back to ' +
+      'an earlier plant; (5) the final beat shows the RESOLUTION — what has changed since the start.\n' +
+      'Keep the staging vivid: beats are SCENES that TRAVEL — start each by naming where/when, and move through ' +
+      'DIFFERENT locations and times; never trap the whole chapter in one room. ' +
+      'Weave the setups in INVISIBLY, as natural story — do NOT annotate them: never write the words "PLANT", ' +
+      '"PAYOFF", "SETUP", or any label/parenthetical marking craft. ' +
+      'Return ONLY the numbered beats — no preamble, no headings, no labels.';
+    const user =
+      this.contextBlock(ctx) +
+      (arch ? `\n\nSTORY ARCHITECTURE (deliver ALL of this through the beats):\n${arch}` : '') +
+      '\n\nWrite the scene beats now.';
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.7, maxTokens: 1400, signal },
+    );
+    // Safety net: strip any craft scaffolding the model leaked into the prose,
+    // so the author never sees "(PLANT 1)" style labels in their beats.
+    return stripCraftLabels(raw);
   }
 
   // ── Step 4: Pages — batched "plan → expand", same as characters ──────────────
@@ -396,7 +523,65 @@ export class ComicAssistant {
    * can't write the same beat repeatedly — every page must do a different job
    * and advance from the one before.
    */
-  async planStoryboard(ctx: StoryContext, count: number, signal?: AbortSignal): Promise<string[]> {
+  async planStoryboard(ctx: StoryContext, count: number, signal?: AbortSignal): Promise<PageBeat[]> {
+    const beats = parseBeats(ctx.synopsis ?? '');
+    const castNames = ctx.characters.map((c) => (c.name ?? '').trim()).filter(Boolean);
+    // Beats-as-spine: when the author has Step-3 beats, the pages are DISTRIBUTED
+    // from them (never re-invented), so nothing the author wrote gets dropped.
+    // Only fall back to inventing an arc when there are no usable beats.
+    let pages =
+      beats.length >= 2
+        ? await this.distributeBeats(ctx, beats, count, signal)
+        : await this.inventArc(ctx, count, signal);
+    // Normalize to exactly `count` pages.
+    pages = pages.slice(0, count);
+    while (pages.length < count) pages.push({ summary: beats[pages.length] ?? ctx.idea, characters: [] });
+    // Map assigned names to the real cast, then guarantee every defined character
+    // lands on at least one page — the root fix for characters vanishing.
+    for (const p of pages) p.characters = canonicalCast(p.characters, castNames);
+    return ensureCastAssigned(pages, castNames);
+  }
+
+  /**
+   * Beats-as-spine: map the author's Step-3 beats onto exactly `count` pages,
+   * covering every beat and inventing nothing. This is the key change — the beats
+   * become the authoritative outline instead of loose context a fresh plan ignores.
+   */
+  private async distributeBeats(
+    ctx: StoryContext,
+    beats: string[],
+    count: number,
+    signal?: AbortSignal,
+  ): Promise<PageBeat[]> {
+    const numbered = beats.map((b, i) => `Beat ${i + 1}: ${b}`).join('\n');
+    const cast = ctx.characters.map((c) => c.name?.trim()).filter(Boolean).join(', ');
+    const system =
+      `You are a comic book writer turning a story's SCENE BEATS into exactly ${count} comic pages. ` +
+      'You are given the numbered beats. DISTRIBUTE them across the pages — do NOT invent a new story. ' +
+      'HARD RULES: (1) every beat must be represented on some page; never drop one — especially the LAST beat, ' +
+      'which is the climax; (2) never add events that are not in the beats; (3) keep the beats in order; ' +
+      '(4) if there are more pages than beats, split the richest beats across consecutive pages; if there are more ' +
+      'beats than pages, combine adjacent beats onto one page, but the final page must still deliver the last beat; ' +
+      '(5) each page is ONE scene — one location, one continuous moment; start each summary by naming where/when; ' +
+      '(6) for each page, list the characters (by their exact names from the cast) who appear on it. ' +
+      `Return ONLY {"pages":[{"summary":"","characters":[""]}]} with exactly ${count} items, in order.`;
+    const user =
+      this.contextBlock(ctx) +
+      `\n\nCAST: ${cast}` +
+      `\n\nSCENE BEATS (distribute ALL of these across ${count} pages, in order — the last beat is the climax and must appear):\n${numbered}` +
+      `\n\nWrite the ${count} pages as JSON.`;
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.6, maxTokens: 1400, schema: STORYBOARD_PLAN_SCHEMA, signal },
+    );
+    return parsePageBeats(raw);
+  }
+
+  /** No beats to build on: invent a complete, progressing arc (original behavior). */
+  private async inventArc(ctx: StoryContext, count: number, signal?: AbortSignal): Promise<PageBeat[]> {
     const fns = beatFunctions(count);
     const roleList = fns.map((f, i) => `Page ${i + 1} — ${f}`).join('\n');
     const system =
@@ -411,9 +596,10 @@ export class ComicAssistant {
       'story through DIFFERENT locations and times — never set every page in the same room; ' +
       '(6) each page is ONE scene: one location, one continuous moment. NEVER combine two scenes or two places into ' +
       'a single page summary — if the story has more events than pages, keep the strongest scenes and drop the rest, ' +
-      'and let consecutive pages flow: a page should pick up where the previous one left off or clearly follow from it.\n\n' +
+      'and let consecutive pages flow: a page should pick up where the previous one left off or clearly follow from it; ' +
+      '(7) for each page, list the characters (by their exact names) who appear on it.\n\n' +
       `PAGE FUNCTIONS (write one summary for each, in this order):\n${roleList}\n\n` +
-      `Return ONLY {"pages":[{"summary":""}]} with exactly ${count} items, in this order.`;
+      `Return ONLY {"pages":[{"summary":"","characters":[""]}]} with exactly ${count} items, in this order.`;
     const raw = await this.ai.chat(
       [
         { role: 'system', content: system },
@@ -421,9 +607,7 @@ export class ComicAssistant {
       ],
       { temperature: 0.7, maxTokens: 1200, schema: STORYBOARD_PLAN_SCHEMA, signal },
     );
-    const parsed = parseJsonObject(raw);
-    const list = Array.isArray(parsed?.pages) ? parsed.pages : [];
-    return list.map((p: any) => String(p?.summary ?? '').trim()).filter((s: string) => s.length > 0);
+    return parsePageBeats(raw);
   }
 
   /**
@@ -438,12 +622,19 @@ export class ComicAssistant {
    */
   async writePage(
     ctx: StoryContext,
-    beats: string[],
+    beats: PageBeat[],
     pageIdx: number,
     memory: StoryboardMemory,
     signal?: AbortSignal,
   ): Promise<SuggestedPage> {
-    const summary = beats[pageIdx] ?? '';
+    const summary = beats[pageIdx]?.summary ?? '';
+    // The cast this page is meant to feature — used as the "who's in frame"
+    // fallback when a panel beat names nobody, so unnamed panels stop defaulting
+    // to the whole ensemble.
+    const assigned = beats[pageIdx]?.characters ?? [];
+    const pageCast = ctx.characters.filter(
+      (c) => c.name?.trim() && c.appearance?.trim() && assigned.some((n) => nameInText(n, c.name ?? '') || nameInText(c.name ?? '', n)),
+    );
     const plan = await this.planPage(ctx, beats, pageIdx, memory, signal);
     const want = panelCountFor(plan.layout);
     const panels: SuggestedPanel[] = [];
@@ -451,7 +642,7 @@ export class ComicAssistant {
     let prevImage = memory.lastImage;
     for (let j = 0; j < want; j++) {
       const slot = plan.panels[j] ?? { beat: summary, dialogue: '', dialogueKind: 'speech' as BubbleKind };
-      const description = (await this.describePanel(ctx, summary, slot, j, want, prevImage, signal)) || slot.beat || summary;
+      const description = (await this.describePanel(ctx, summary, slot, j, want, prevImage, pageCast, signal)) || slot.beat || summary;
       prevImage = description;
       panels.push({ description, dialogue: slot.dialogue, dialogueKind: slot.dialogueKind });
     }
@@ -466,16 +657,17 @@ export class ComicAssistant {
    */
   private async planPage(
     ctx: StoryContext,
-    beats: string[],
+    beats: PageBeat[],
     pageIdx: number,
     memory: StoryboardMemory,
     signal?: AbortSignal,
   ): Promise<{ layout: LayoutId; panels: PanelPlanSlot[] }> {
     const total = beats.length;
     const index = pageIdx + 1;
-    const summary = beats[pageIdx] ?? '';
+    const summary = beats[pageIdx]?.summary ?? '';
+    const pageCharacters = beats[pageIdx]?.characters ?? [];
     const outline = beats
-      .map((b, i) => `${i + 1}. ${b}${i === pageIdx ? '   ← THIS PAGE' : ''}`)
+      .map((b, i) => `${i + 1}. ${b.summary}${i === pageIdx ? '   ← THIS PAGE' : ''}`)
       .join('\n');
     const system =
       'You are a comic book writer scripting ONE page of a longer story. It must ADVANCE the story: depict THIS ' +
@@ -523,6 +715,9 @@ export class ComicAssistant {
             .map((l) => `- ${l}`)
             .join('\n')}`
         : '') +
+      (pageCharacters.length
+        ? `\n\nCHARACTERS ON THIS PAGE — you MUST name EACH of these in at least one panel's "beat": ${pageCharacters.join(', ')}`
+        : '') +
       `\n\nWrite ONLY page ${index} of ${total} — its beat: ${summary}\nScript this page as JSON.`;
     const raw = await this.ai.chat(
       [
@@ -551,6 +746,16 @@ export class ComicAssistant {
         };
       })
       .filter((p: PanelPlanSlot) => p.beat.length > 0 || p.dialogue.length > 0);
+    // Backstop the coverage guarantee: any character this page must feature but
+    // that the model failed to name gets written into a panel beat, so the art
+    // brief renders them (charactersNamedIn keys off the beat text).
+    if (panels.length) {
+      for (const name of pageCharacters) {
+        if (panels.some((p) => nameInText(`${p.beat} ${p.dialogue}`, name))) continue;
+        const target = panels.reduce((a, b) => (a.beat.length <= b.beat.length ? a : b));
+        target.beat = `${target.beat} ${name} is present in the frame.`.trim();
+      }
+    }
     return { layout, panels };
   }
 
@@ -567,6 +772,7 @@ export class ComicAssistant {
     index: number,
     total: number,
     prevImage: string,
+    pageCast: StoryContext['characters'],
     signal?: AbortSignal,
   ): Promise<string> {
     const system =
@@ -582,10 +788,16 @@ export class ComicAssistant {
       'Return ONLY the paragraph — no preamble, no quotes, no JSON.';
     // Only hand the model the characters this panel actually involves — giving
     // it the whole cast every time is how every frame becomes the same group
-    // shot. Fall back to the full cast when the beat names nobody.
-    const inShot = charactersNamedIn(ctx.characters, `${slot.beat} ${slot.dialogue}`);
-    const cast = inShot
-      .map((c) => `- ${c.name.trim()}: ${c.appearance!.trim()}`)
+    // shot. When the beat names nobody, fall back to THIS PAGE's cast (not the
+    // whole book), so the frame stays focused on who the page is about.
+    const named = charactersNamedIn(ctx.characters, `${slot.beat} ${slot.dialogue}`);
+    const scope = named.length
+      ? named
+      : pageCast.length
+        ? pageCast
+        : ctx.characters.filter((c) => c.name?.trim() && c.appearance?.trim());
+    const cast = scope
+      .map((c) => `- ${c.name!.trim()}: ${c.appearance!.trim()}`)
       .join('\n');
     const user =
       (cast ? `CHARACTERS (keep each looking exactly like this):\n${cast}\n\n` : '') +
@@ -699,8 +911,9 @@ export class ComicAssistant {
 
 /**
  * The characters whose name (or distinctive first name) appears in the text.
- * Falls back to the whole described cast when nobody is named, so a vague
- * beat still renders consistent characters.
+ * Returns ONLY the matched characters (possibly empty) — the caller decides the
+ * fallback, so an unnamed panel can default to the page's cast rather than the
+ * whole book.
  */
 function charactersNamedIn(
   characters: StoryContext['characters'],
@@ -708,12 +921,84 @@ function charactersNamedIn(
 ): StoryContext['characters'] {
   const cast = (characters || []).filter((c) => c.name?.trim() && c.appearance?.trim());
   const hay = (text || '').toLowerCase();
-  if (!hay.trim()) return cast;
-  const named = cast.filter((c) => {
-    const first = c.name!.trim().split(/\s+/)[0].toLowerCase();
-    return hay.includes(c.name!.trim().toLowerCase()) || (first.length >= 3 && hay.includes(first));
-  });
-  return named.length ? named : cast;
+  if (!hay.trim()) return [];
+  return cast.filter((c) => nameInText(hay, c.name ?? ''));
+}
+
+/** Does the text name this character — full name, or a first name of length >= 3? */
+function nameInText(text: string, name: string): boolean {
+  const hay = (text || '').toLowerCase();
+  const full = (name || '').trim().toLowerCase();
+  if (!full) return false;
+  if (hay.includes(full)) return true;
+  const first = full.split(/\s+/)[0] ?? '';
+  return first.length >= 3 && hay.includes(first);
+}
+
+/**
+ * Remove craft scaffolding a model sometimes leaves in the beats — "(**PLANT 1**)",
+ * "PAYOFF:", "SETUP" — so the author only ever reads clean story prose.
+ */
+function stripCraftLabels(text: string): string {
+  return (text || '')
+    .replace(/\(?\s*\**\s*(plants?|payoffs?|set[- ]?ups?)\b\s*\d*\s*:?\s*\**\s*\)?/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([.,;:])/g, '$1')
+    .replace(/\(\s*\)/g, '')
+    .trim();
+}
+
+/** Split the Step-3 beats blob into individual beats (numbered / paragraphs / sentences). */
+function parseBeats(synopsis: string): string[] {
+  const t = (synopsis || '').trim();
+  if (!t) return [];
+  const numbered = t.split(/\n(?=\s*\d+[.)]\s)/).map((s) => s.trim()).filter(Boolean);
+  if (numbered.length >= 2) return numbered;
+  const paras = t.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
+  if (paras.length >= 2) return paras;
+  return t.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+}
+
+/** Parse a storyboard-plan reply into page beats (summary + assigned cast). */
+function parsePageBeats(raw: string): PageBeat[] {
+  const parsed = parseJsonObject(raw);
+  const list = Array.isArray(parsed?.pages) ? parsed.pages : [];
+  return list
+    .map((p: any) => ({
+      summary: String(p?.summary ?? '').trim(),
+      characters: Array.isArray(p?.characters)
+        ? p.characters.map((n: any) => String(n ?? '').trim()).filter(Boolean)
+        : [],
+    }))
+    .filter((p: PageBeat) => p.summary.length > 0);
+}
+
+/** Keep only assigned names that match a real cast member, mapped to the canonical name. */
+function canonicalCast(assigned: string[], castNames: string[]): string[] {
+  const out: string[] = [];
+  for (const raw of assigned || []) {
+    const hit = castNames.find((c) => nameInText(raw, c) || nameInText(c, raw));
+    if (hit && !out.includes(hit)) out.push(hit);
+  }
+  return out;
+}
+
+/**
+ * Guarantee every defined character is assigned to at least one page, so no one
+ * silently drops out of the whole book. Unassigned characters go to the
+ * least-populated page, spreading the ensemble instead of piling onto one frame.
+ */
+function ensureCastAssigned(pages: PageBeat[], castNames: string[]): PageBeat[] {
+  if (!pages.length) return pages;
+  const assigned = new Set(pages.flatMap((p) => p.characters.map((n) => n.toLowerCase())));
+  for (const name of castNames) {
+    if (assigned.has(name.toLowerCase())) continue;
+    let idx = 0;
+    for (let i = 1; i < pages.length; i++) if (pages[i].characters.length < pages[idx].characters.length) idx = i;
+    pages[idx].characters.push(name);
+    assigned.add(name.toLowerCase());
+  }
+  return pages;
 }
 
 /** Parse a JSON object from a model reply, tolerating stray prose or code fences. */
