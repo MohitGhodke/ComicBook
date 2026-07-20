@@ -12,6 +12,7 @@ import { ComicBook, Character, Chapter, Page, Panel, ImageRef, LayoutId, ReaderP
 import { StoryBible } from '../../core/models/story-bible.model';
 import { LAYOUTS, newPanel, applyLayout, migratePage } from '../../core/models/layout';
 import { newId } from '../../core/util/id';
+import { timestamp } from '../../core/util/time';
 import { cleanDialogue } from '../../core/util/text';
 import { Draft, emptyDraft, draftHasContent, newStyleSeed } from '../../core/services/draft';
 import { StyleConfig } from '../../core/services/style.config';
@@ -26,8 +27,6 @@ interface StepDef {
   title: string;
   teach: string;
 }
-
-type AssembleMode = 'new' | 'existing';
 
 @Component({
   selector: 'app-creator',
@@ -724,9 +723,4 @@ export class Creator implements OnInit {
   done() {
     this.router.navigate(['/']);
   }
-}
-
-/** localStorage draft uses no timestamps; stamp only at publish time. */
-function timestamp(): number {
-  return Date.now();
 }

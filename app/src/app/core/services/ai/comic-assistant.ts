@@ -6,7 +6,7 @@ import { cleanDialogue } from '../../util/text';
 import { BubbleKind, LayoutId } from '../../models/comic.model';
 import { LAYOUTS, panelCountFor } from '../../models/layout';
 import {
-  StoryBible, Scene, Section, BibleCharacter, ContinuityState,
+  StoryBible, Scene, Section, BibleCharacter, ContinuityState, SetupPair,
   STORY_BIBLE_SCHEMA_VERSION, userField, aiField, emptyField,
 } from '../../models/story-bible.model';
 import { newId } from '../../util/id';
@@ -160,23 +160,6 @@ const ONE_CHARACTER_SCHEMA = {
     required: ['name', 'appearance', 'traits'],
   },
 };
-
-const REVIEW_SCHEMA = {
-  name: 'review',
-  schema: {
-    type: 'object',
-    properties: {
-      suggestions: { type: 'array', items: { type: 'string' } },
-    },
-    required: ['suggestions'],
-  },
-};
-
-/** One plant→payoff pair: something set up early so a later moment lands. */
-interface SetupPair {
-  plant: string;
-  payoff: string;
-}
 
 /** The dramatic architecture a chapter's beats must deliver (Step 3, pass A). */
 interface StorySpine {
@@ -1192,31 +1175,6 @@ export class ComicAssistant {
         : '\n\nDo NOT render any "written by", "by", or author credit text anywhere on the cover — none was given.';
       return `${heading}\n${composition}${blurbBlock}${creditBlock}\n\n${styleBlock(style)}`;
     }
-  }
-
-  // ── Editor: qualitative review ───────────────────────────────────────────────
-  /**
-   * Read the whole comic and return a few concrete, actionable suggestions to
-   * make it better (pacing, clarity, character, theme, art direction). This
-   * complements the deterministic "what's missing" checks the editor runs
-   * locally — the AI adds craft feedback the checklist can't.
-   */
-  async reviewComic(ctx: StoryContext, stats: string, signal?: AbortSignal): Promise<string[]> {
-    const system =
-      'You are a seasoned comics editor giving a creator feedback. From the comic\'s story and structure, ' +
-      'give 3 to 5 specific, actionable suggestions to improve it — pacing, character clarity, theme, dialogue, or art direction. ' +
-      'Each suggestion should be one concrete sentence the creator can act on. Do not restate the plot. ' +
-      'Return ONLY a JSON object of the form {"suggestions":["",""]}.';
-    const raw = await this.ai.chat(
-      [
-        { role: 'system', content: system },
-        { role: 'user', content: this.contextBlock(ctx) + '\n\nSTRUCTURE: ' + stats + '\n\nReturn the suggestions JSON.' },
-      ],
-      { temperature: 0.6, maxTokens: 1600, schema: REVIEW_SCHEMA, signal },
-    );
-    const parsed = parseJsonObject(raw);
-    const list = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
-    return list.map((s: any) => String(s ?? '').trim()).filter((s: string) => s.length > 0);
   }
 
   /** Compact, readable summary of the story so far for prompting. */

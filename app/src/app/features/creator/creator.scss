@@ -215,16 +215,9 @@
   .page-preview-col { position: static; max-width: 260px; }
 }
 
-.page-grid { display: grid; grid-template-columns: 200px 1fr; gap: 1.1rem; }
-.page-art { display: flex; flex-direction: column; gap: 0.55rem; }
-.page-art img, .art-empty {
-  width: 100%; aspect-ratio: 3 / 4; border-radius: var(--radius-sm);
-  object-fit: cover; background: var(--paper-2); border: 1px solid var(--line);
-}
-.art-empty { display: grid; place-items: center; font-size: 0.85rem; }
+.art-empty { display: grid; place-items: center; font-size: 0.85rem; background: var(--paper-2); }
 .art-actions { display: flex; flex-direction: column; gap: 0.4rem; }
 .upload { text-align: center; cursor: pointer; }
-.page-text { display: flex; flex-direction: column; gap: 0.8rem; }
 
 /* ── Interactions cast chips ── */
 .cast-reminder { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
@@ -234,18 +227,6 @@
 }
 
 /* ── Assemble ── */
-.mode-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-.mode-card {
-  text-align: left; display: flex; flex-direction: column; gap: 0.3rem;
-  padding: 0.9rem 1rem; border: none; border-left: 2px solid transparent; border-radius: 0;
-  background: transparent; cursor: pointer; font: inherit; color: inherit;
-  transition: background 0.14s ease, border-color 0.14s ease;
-}
-.mode-card:hover:not(:disabled) { background: var(--paper-2); }
-.mode-card.selected { border-left-color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
-.mode-card:disabled { opacity: 0.5; cursor: not-allowed; }
-.mode-title { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; }
-
 .cover-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; }
 .cover-slot { display: flex; flex-direction: column; gap: 0.55rem; }
 .cover-thumb, .cover-empty { width: 120px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: var(--radius-sm); }
@@ -277,7 +258,5 @@
   .step-label { display: none; }
   .panel-scroll { padding: 1.4rem 1.2rem 1rem; }
   .panel-foot { padding: 0.8rem 1.2rem; }
-  .page-grid { grid-template-columns: 1fr; }
-  .mode-choice { grid-template-columns: 1fr; }
   .cover-pair { grid-template-columns: 1fr; }
 }
