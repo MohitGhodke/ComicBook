@@ -2,7 +2,7 @@ import { Component, inject, signal, computed, WritableSignal, OnInit } from '@an
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Reader } from '../reader/reader';
-import { PagePreview } from '../shared/page-preview';
+import { PagePreview, BubbleRepositionEvent, TailRepositionEvent } from '../shared/page-preview';
 import { ComicLibraryService } from '../../core/services/comic-library.service';
 import { StorageService } from '../../core/services/storage.service';
 import { PromptService } from '../../core/services/prompt.service';
@@ -324,7 +324,7 @@ export class Creator implements OnInit {
     const copied = side === 'front' ? this.frontCoverCopied : this.backCoverCopied;
     copied.set(false);
     text.set(null);
-    const prompt = await this.run(loading, (s) => this.assistant.coverPrompt(this.storyContext(), this.draft.title, this.style(), side, s));
+    const prompt = await this.run(loading, (s) => this.assistant.coverPrompt(this.storyContext(), this.draft.title, this.style(), side, s, this.draft.author));
     if (prompt !== null) {
       text.set(prompt || '(the model returned nothing — try again)');
       this.writeClipboard(prompt, copied);
@@ -514,6 +514,19 @@ export class Creator implements OnInit {
 
   setBubbleKind(panel: Panel, kind: BubbleKind) {
     panel.dialogueKind = kind;
+    this.persist();
+  }
+
+  onBubbleReposition(e: BubbleRepositionEvent) {
+    e.panel.bubbleX = e.bubbleX;
+    e.panel.bubbleY = e.bubbleY;
+    this.persist();
+  }
+
+  onTailReposition(e: TailRepositionEvent) {
+    e.panel.tailX = e.tailX;
+    e.panel.tailY = e.tailY;
+    e.panel.tailAngle = e.tailAngle;
     this.persist();
   }
 

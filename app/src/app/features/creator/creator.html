@@ -336,7 +336,9 @@
                   </div>
                   <app-page-preview [page]="p" [thumbs]="thumbs()" [interactive]="true"
                                     [selectedId]="selectedPanel?.id ?? null"
-                                    (panelSelect)="selectPanel($event)" />
+                                    (panelSelect)="selectPanel($event)"
+                                    (bubbleReposition)="onBubbleReposition($event)"
+                                    (tailReposition)="onTailReposition($event)" />
                 </aside>
 
                 <div class="page-edit-col">

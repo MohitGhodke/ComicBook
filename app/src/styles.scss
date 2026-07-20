@@ -219,6 +219,39 @@ a { color: inherit; }
 }
 .panel .bubble.narration::after,
 .panel .bubble.narration::before { display: none; }
+
+/* Custom (dragged) tail replaces the fixed pseudo-element tail. */
+.panel .bubble.custom-tail::after,
+.panel .bubble.custom-tail::before { display: none; }
+.panel .bubble-tail {
+  position: absolute;
+  width: 0.62em; height: 0.62em;
+  background: var(--card);
+  border-right: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  pointer-events: none;
+}
+
+/* Editing affordances — bubble drag + freeform tail handle (creator only). */
+.panel.interactive .bubble:not(.narration) {
+  cursor: grab;
+  touch-action: none;
+}
+.panel.interactive .bubble:not(.narration):active { cursor: grabbing; }
+.panel.interactive .tail-handle {
+  position: absolute;
+  width: 0.9em; height: 0.9em;
+  margin: -0.45em;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.35;
+  cursor: grab;
+  touch-action: none;
+  transition: opacity 0.12s ease;
+}
+.panel.interactive .tail-handle:hover,
+.panel.interactive .tail-handle:active { opacity: 0.9; cursor: grabbing; }
+
 .panel .panel-empty {
   position: absolute; inset: 0;
   display: grid; place-items: center;

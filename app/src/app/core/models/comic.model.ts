@@ -58,6 +58,19 @@ export interface Panel {
   imageRef?: ImageRef;
   /** Static, copy-paste image prompt for this panel. */
   imagePrompt?: string;
+  /** Custom bubble position, top-left anchor as % of the panel. Unset = default (left:7%; bottom:9%). */
+  bubbleX?: number;
+  bubbleY?: number;
+  /**
+   * Custom tail-tip position as % of the panel, and its final rotation in
+   * degrees. The angle is computed once at drag time (using the panel's real
+   * pixel aspect ratio) and stored rather than recomputed on every render, so
+   * the reader doesn't need to re-derive per-layout pixel ratios. Unset =
+   * default fixed pseudo-element tail.
+   */
+  tailX?: number;
+  tailY?: number;
+  tailAngle?: number;
 }
 
 export interface Page {
@@ -114,6 +127,11 @@ export interface ReaderPanel {
   src: string;
   dialogue?: string;
   dialogueKind?: BubbleKind;
+  bubbleX?: number;
+  bubbleY?: number;
+  tailX?: number;
+  tailY?: number;
+  tailAngle?: number;
 }
 
 /** A single spread page the Reader renders, flattened from a ComicBook. */

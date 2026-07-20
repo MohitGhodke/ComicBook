@@ -180,9 +180,23 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
           if (panel.dialogue) {
             const bubble = document.createElement('div');
             const kind = panel.dialogueKind && panel.dialogueKind !== 'speech' ? ' ' + panel.dialogueKind : '';
-            bubble.className = 'bubble' + kind;
+            const hasCustomTail = panel.dialogueKind !== 'narration' && panel.tailX != null;
+            bubble.className = 'bubble' + kind + (hasCustomTail ? ' custom-tail' : '');
             bubble.textContent = panel.dialogue;
+            if (panel.bubbleX != null) {
+              bubble.style.left = panel.bubbleX + '%';
+              bubble.style.top = panel.bubbleY + '%';
+              bubble.style.bottom = 'auto';
+            }
             fig.appendChild(bubble);
+            if (hasCustomTail) {
+              const tail = document.createElement('div');
+              tail.className = 'bubble-tail';
+              tail.style.left = panel.tailX + '%';
+              tail.style.top = panel.tailY + '%';
+              tail.style.transform = `rotate(${(panel.tailAngle ?? 90) - 45}deg)`;
+              fig.appendChild(tail);
+            }
           }
           grid.appendChild(fig);
         });

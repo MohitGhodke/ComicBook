@@ -101,6 +101,11 @@ export class ComicLibraryService {
             src: await this.storage.resolveUrl(panel.imageRef),
             dialogue: cleanDialogue(panel.dialogue),
             dialogueKind: panel.dialogueKind ?? 'speech',
+            bubbleX: panel.bubbleX,
+            bubbleY: panel.bubbleY,
+            tailX: panel.tailX,
+            tailY: panel.tailY,
+            tailAngle: panel.tailAngle,
           });
         }
         if (panels.length === 0) continue; // nothing to render yet

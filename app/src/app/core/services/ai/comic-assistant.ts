@@ -218,8 +218,14 @@ interface StoryboardMemory {
   layouts: LayoutId[];
   /** Every dialogue line already spoken anywhere in the book. */
   lines: string[];
-  /** The final panel image of the previous page — the moment to move on FROM. */
+  /** The final panel image of the previous page — the moment to CONTINUE from. */
   lastImage: string;
+  /**
+   * The previous page's one-line story summary — the narrative thread this page
+   * must pick up. Without it, each page only knows what NOT to repeat, never
+   * what to continue, and the book reads as disconnected scenes.
+   */
+  prevSummary: string;
 }
 
 /** Model sometimes leaks the dialogueKind enum (or a "none" filler) into the dialogue field. */
@@ -501,16 +507,18 @@ export class ComicAssistant {
     signal?: AbortSignal,
   ): Promise<SuggestedPage[]> {
     const beats = await this.planStoryboard(ctx, count, signal);
-    const memory: StoryboardMemory = { layouts: [], lines: [], lastImage: '' };
+    const memory: StoryboardMemory = { layouts: [], lines: [], lastImage: '', prevSummary: '' };
     const out: SuggestedPage[] = [];
     for (let i = 0; i < beats.length; i++) {
-      // Each page sees the whole outline PLUS what earlier pages actually wrote
-      // (layouts, spoken lines, the last image) so it must move on, not repeat.
+      // Each page sees the whole outline PLUS what earlier pages actually wrote:
+      // the layouts and spoken lines it must NOT repeat, and the previous page's
+      // summary + last image it must CONTINUE FROM — so pages connect, not just differ.
       const page = await this.writePage(ctx, beats, i, memory, signal);
       memory.layouts.push(page.layout);
       for (const p of page.panels) if (p.dialogue) memory.lines.push(p.dialogue);
       const last = page.panels[page.panels.length - 1];
       if (last?.description) memory.lastImage = last.description;
+      memory.prevSummary = beats[i]?.summary ?? '';
       out.push(page);
       onProgress?.(i + 1, beats.length, page);
     }
@@ -563,7 +571,10 @@ export class ComicAssistant {
       '(4) if there are more pages than beats, split the richest beats across consecutive pages; if there are more ' +
       'beats than pages, combine adjacent beats onto one page, but the final page must still deliver the last beat; ' +
       '(5) each page is ONE scene — one location, one continuous moment; start each summary by naming where/when; ' +
-      '(6) for each page, list the characters (by their exact names from the cast) who appear on it. ' +
+      '(6) consecutive pages must read as ONE continuous chain — each page follows as a direct consequence of the ' +
+      'one before it and leads into the next; a reader must never feel the story jumped from one page to the next ' +
+      'without connection; ' +
+      '(7) for each page, list the characters (by their exact names from the cast) who appear on it. ' +
       `Return ONLY {"pages":[{"summary":"","characters":[""]}]} with exactly ${count} items, in order.`;
     const user =
       this.contextBlock(ctx) +
@@ -671,13 +682,21 @@ export class ComicAssistant {
       .join('\n');
     const system =
       'You are a comic book writer scripting ONE page of a longer story. It must ADVANCE the story: depict THIS ' +
-      'page\'s beat as a NEW moment, never a redraw or re-staging of anything already shown.\n' +
+      'page\'s beat as the NEXT moment in the same unfolding events — never a redraw or re-staging of anything ' +
+      'already shown.\n' +
+      'HARD RULE — CONTINUITY (this is what makes it a STORY, not a slideshow): unless this is page 1, this page ' +
+      'is the DIRECT CONSEQUENCE of the page before it. Carry the SAME characters and the SAME unresolved ' +
+      'situation forward, and show what happens NEXT because of it. A reader must be able to follow, with zero ' +
+      'confusion, WHY the story moved from the previous page to this one. NEVER open an unrelated scene, and never ' +
+      'abandon the thread you were handed — pick it up and push it forward.\n' +
       'HARD RULE — ONE SCENE PER PAGE: every panel on this page happens in the SAME location within the same ' +
       'continuous moment. Never cut to a different place, a different time, or a parallel group of characters ' +
       'mid-page. If the beat implies travel or several places, show only the destination — the most dramatic one.\n' +
-      'BRIDGE SCENE CHANGES: if this page happens in a different place or time than the page before it, panel 1 ' +
-      'must carry a short narration caption naming the new place/time (e.g. "Two days later — the launch site.") ' +
-      'with dialogueKind "narration". That caption is how the reader follows the jump.\n' +
+      'BRIDGE SCENE CHANGES: change place or time ONLY when this page\'s beat truly requires it, and let the change ' +
+      'be MOTIVATED by what just happened — the characters are here because of the previous page, not by accident. ' +
+      'When you do jump, panel 1 must carry a short narration caption naming the new place/time (e.g. "Two days ' +
+      'later — the launch site.") with dialogueKind "narration", so the reader follows it. A jump with no cause is ' +
+      'forbidden; a scene that simply continues needs no caption.\n' +
       'FIRST choose the panel layout that fits this moment:\n' +
       '- splash = one big dramatic full-page panel (a reveal, a huge emotional beat)\n' +
       '- strip3 = 3 stacked panels (steady beats, a short exchange)\n' +
@@ -706,8 +725,15 @@ export class ComicAssistant {
       (memory.layouts.length
         ? `\n\nLAYOUTS ALREADY USED (pages 1–${memory.layouts.length}, in order): ${memory.layouts.join(', ')}`
         : '') +
+      (memory.prevSummary
+        ? `\n\nTHE PAGE BEFORE THIS ONE (page ${index - 1}) showed: ${memory.prevSummary}\n` +
+          'THIS page picks up directly from it — the same thread, its very next moment or its consequence. ' +
+          'Continue that story; do NOT restart with an unconnected scene.'
+        : '') +
       (memory.lastImage
-        ? `\n\nTHE PREVIOUS PAGE ENDED ON THIS IMAGE (move on from it — new action, never re-stage it):\n${memory.lastImage}`
+        ? `\n\nThe previous page's final image was:\n${memory.lastImage}\n` +
+          'Start the story from here and move it FORWARD — show what happens next (do not redraw this exact shot), ' +
+          'while staying inside the same continuous story.'
         : '') +
       (memory.lines.length
         ? `\n\nLINES ALREADY SPOKEN (never repeat any of these):\n${memory.lines
@@ -836,18 +862,23 @@ export class ComicAssistant {
     style: ArtStyle,
     side: 'front' | 'back' = 'front',
     signal?: AbortSignal,
+    author?: string,
   ): Promise<string> {
     const front =
       'You are a comic book cover art director. Describe the SUBJECT and COMPOSITION for the FRONT COVER of this comic: ' +
-      'the focal character(s) and their pose, the setting, and the mood. Make it iconic and eye-catching, and leave clear ' +
-      'space at the top for the title text. Describe ONLY what is depicted — do NOT mention art style, medium, colour palette, ' +
-      'or aspect ratio (those are fixed and added separately). Return ONE paragraph, no preamble, no quotation marks.';
+      'the focal character(s) and their pose, the setting, and the mood. Make it iconic and eye-catching. The top THIRD of the ' +
+      'frame must be left completely empty — no character, object, or background detail may extend into it — because that ' +
+      'band is reserved for the title text and shelf thumbnails crop into the very top edge of the image. Compose the scene ' +
+      'entirely in the lower two-thirds of the frame. Describe ONLY what is depicted — do NOT mention art style, medium, colour ' +
+      'palette, or aspect ratio (those are fixed and added separately). Return ONE paragraph, no preamble, no quotation marks.';
     const back =
       'You are a comic book cover art director. Describe the SUBJECT and COMPOSITION for the BACK COVER of this comic. ' +
       'It should COMPLEMENT the front, not repeat it: a quieter, more atmospheric single scene or recurring motif from the story, ' +
-      'with clear empty space for a short synopsis blurb and small credits at the bottom. Describe ONLY what is depicted — ' +
-      'do NOT mention art style, medium, colour palette, or aspect ratio (those are fixed and added separately). ' +
-      'Return ONE paragraph, no preamble, no quotation marks.';
+      'with clear empty space for a short synopsis blurb (and, if given, a credit line below it) in the lower portion of the frame. ' +
+      'That empty space must stop short of the very bottom edge — leave a margin of at least the bottom tenth of the frame ' +
+      'completely clear of text as well as art, since preview thumbnails crop into the bottom edge just as they do the top. ' +
+      'Describe ONLY what is depicted — do NOT mention art style, medium, colour palette, or aspect ratio (those are fixed and ' +
+      'added separately). Return ONE paragraph, no preamble, no quotation marks.';
     const user =
       (title?.trim() ? `TITLE: ${title.trim()}\n` : '') +
       this.contextBlock(ctx) +
@@ -862,7 +893,33 @@ export class ComicAssistant {
     if (!composition) return composition;
     // Bake in the shared style + aspect ratio so every cover matches the pages.
     const heading = `${side === 'back' ? 'Back' : 'Front'} cover of the comic book${title?.trim() ? ` "${title.trim()}"` : ''}.`;
-    return `${heading}\n${composition}\n\n${styleBlock(style)}`;
+    if (side === 'front') {
+      // Don't rely on the composition LLM to have preserved the margin
+      // instruction (it's told to describe only the scene, so it can drop
+      // compositional directives) — bake it into the final prompt directly,
+      // stated up front and in the strongest terms, so it always survives
+      // into what actually gets pasted into the image tool.
+      const marginBlock =
+        'CRITICAL — TOP MARGIN (do not skip this): the top 25% of the image, all the way from the very top edge down, ' +
+        'must be completely empty flat background with absolutely NO character, face, object, or foreground detail crossing ' +
+        'into it. This band is reserved for the title text and is the first part cut off by preview thumbnails, so anything ' +
+        'placed there will be lost. Compose the entire scene — every character and object — within the lower 75% of the frame only.';
+      return `${heading}\n\n${marginBlock}\n\n${composition}\n\n${styleBlock(style)}`;
+    } else {
+      // Real books print a premise blurb on the back cover — reuse the same
+      // story description the author already wrote, rather than having the
+      // model paraphrase it, and ask the art to render it as jacket copy.
+      const blurb = ctx.idea?.trim();
+      const blurbBlock = blurb
+        ? `\n\nIn the empty space reserved for the synopsis, render this exact blurb text as clean, readable typography: "${blurb}"`
+        : '';
+      // Only mention an author credit at all when one was actually given —
+      // otherwise the image model tends to invent a fake byline on its own.
+      const creditBlock = author?.trim()
+        ? `\n\nBelow the blurb, render a small credit line: "by ${author.trim()}" — keep it well clear of the very bottom edge, with a visible empty margin beneath it, so it isn't cropped in preview thumbnails`
+        : '\n\nDo NOT render any "written by", "by", or author credit text anywhere on the cover — none was given.';
+      return `${heading}\n${composition}${blurbBlock}${creditBlock}\n\n${styleBlock(style)}`;
+    }
   }
 
   // ── Editor: qualitative review ───────────────────────────────────────────────
