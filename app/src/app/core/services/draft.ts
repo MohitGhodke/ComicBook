@@ -1,4 +1,4 @@
-import { Character, ImageRef, Page } from '../models/comic.model';
+import { BubbleFontSize, Character, ImageRef, Page } from '../models/comic.model';
 import { DEFAULT_STYLE_ID } from '../style/art-styles';
 
 /**
@@ -27,6 +27,8 @@ export interface Draft {
   styleSeed: number;
   /** Chosen art style id — captured into the book's metadata. */
   styleId: string;
+  /** Bubble/caption text size for the whole book — captured from Settings at creation. */
+  bubbleFontSize: BubbleFontSize;
 }
 
 /** A fresh, book-stable style seed (5 digits — easy to paste into image tools). */
@@ -37,7 +39,7 @@ export function newStyleSeed(): number {
 export function emptyDraft(): Draft {
   return {
     title: '', idea: '', setting: '', era: '', tone: '', author: '', characters: [], synopsis: '', pages: [],
-    styleSeed: newStyleSeed(), styleId: DEFAULT_STYLE_ID,
+    styleSeed: newStyleSeed(), styleId: DEFAULT_STYLE_ID, bubbleFontSize: 'large',
   };
 }
 

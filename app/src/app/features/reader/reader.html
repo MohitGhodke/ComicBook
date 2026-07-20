@@ -51,5 +51,19 @@
         <circle cx="8" cy="8" r="2.2" />
       </svg>
     </button>
+
+    <div class="font-size-wrap">
+      <button class="nav-btn font-size-btn" [class.active]="fontPanelOpen()"
+              (click)="toggleFontPanel()" aria-label="Bubble text size" title="Bubble text size">Aa</button>
+
+      <div class="jump-panel font-size-panel" [class.open]="fontPanelOpen()">
+        <span class="jump-label">Bubble text size</span>
+        <app-font-size-slider [value]="effectiveFontSize()" ariaLabel="Bubble text size"
+                               (valueChange)="setReaderFontSize($event)" />
+        @if (readerFontOverride() !== 'auto') {
+          <button class="font-size-reset" (click)="resetReaderFontSize()">Use this comic's default</button>
+        }
+      </div>
+    </div>
   </nav>
 </div>

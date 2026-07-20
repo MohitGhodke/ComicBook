@@ -1,8 +1,9 @@
 import { Component, EventEmitter, Input, NgZone, Output, inject } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { Page, Panel } from '../../core/models/comic.model';
+import { BubbleFontSize, Page, Panel } from '../../core/models/comic.model';
 import { cleanDialogue } from '../../core/util/text';
 import { DEFAULT_BUBBLE, DEFAULT_TAIL, tailWedgePoints } from '../../core/util/bubble-tail';
+import { fontSizeClass } from '../../core/util/font-size';
 
 export interface BubbleRepositionEvent {
   panel: Panel;
@@ -14,6 +15,14 @@ export interface TailRepositionEvent {
   tailX: number;
   tailY: number;
 }
+export interface CaptionRepositionEvent {
+  panel: Panel;
+  captionX: number;
+  captionY: number;
+}
+
+/** Matches the caption's fixed CSS default (left: 4%; top: 4%). */
+const DEFAULT_CAPTION = { x: 4, y: 4 };
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
@@ -37,7 +46,7 @@ function clamp(n: number, min: number, max: number): number {
   template: `
     <div class="pp-frame">
       @if (page && page.panels?.length) {
-        <div class="panel-grid" [ngClass]="'layout-' + (page.layout || 'splash')">
+        <div class="panel-grid" [ngClass]="'layout-' + (page.layout || 'splash') + ' ' + fontSizeClass(fontSize)">
           @for (panel of page.panels; track panel.id) {
             <figure class="panel"
                     [class.interactive]="interactive"
@@ -49,7 +58,10 @@ function clamp(n: number, min: number, max: number): number {
                 <div class="panel-empty">Panel {{ $index + 1 }}</div>
               }
               @if (panel.narration?.trim()) {
-                <div class="caption">{{ panel.narration!.trim() }}</div>
+                <div class="caption" [class.custom-pos]="canDragCaption(panel)"
+                     [style.left.%]="panel.captionX" [style.top.%]="panel.captionY"
+                     [style.right]="panel.captionX != null ? 'auto' : null"
+                     (pointerdown)="onCaptionDown($event, panel)">{{ panel.narration!.trim() }}</div>
               }
               @if (clean(panel.dialogue); as line) {
                 <div class="bubble"
@@ -101,6 +113,8 @@ export class PagePreview {
 
   @Input() page: Page | null = null;
   @Input() thumbs: Record<string, string> = {};
+  /** Bubble/caption text size for this page. */
+  @Input() fontSize: BubbleFontSize = 'large';
   /** Enables click-to-select behaviour (used by the page editor). */
   @Input() interactive = false;
   /** Id of the panel currently being edited — gets the accent outline. */
@@ -111,8 +125,11 @@ export class PagePreview {
   @Output() bubbleReposition = new EventEmitter<BubbleRepositionEvent>();
   /** Fires once a tail-tip drag settles — the parent owns mutating + persisting. */
   @Output() tailReposition = new EventEmitter<TailRepositionEvent>();
+  /** Fires once a caption drag settles — the parent owns mutating + persisting. */
+  @Output() captionReposition = new EventEmitter<CaptionRepositionEvent>();
 
   readonly tailDefaults = DEFAULT_TAIL;
+  readonly fontSizeClass = fontSizeClass;
 
   onSelect(id: string) {
     if (this.interactive) this.panelSelect.emit(id);
@@ -126,6 +143,12 @@ export class PagePreview {
    *  is being edited, or once the author has actually customised it. */
   canDragTail(panel: Panel): boolean {
     return panel.dialogueKind !== 'narration' && (this.interactive || panel.tailX != null);
+  }
+
+  /** A custom (draggable) caption position replaces the fixed top banner once
+   *  the panel is being edited, or once the author has actually moved it. */
+  canDragCaption(panel: Panel): boolean {
+    return this.interactive || panel.captionX != null;
   }
 
   tailPoints(panel: Panel): string {
@@ -217,6 +240,44 @@ export class PagePreview {
       handleEl.addEventListener('pointerup', finish);
       handleEl.addEventListener('pointercancel', finish);
       handleEl.addEventListener('lostpointercapture', finish);
+    });
+  }
+
+  onCaptionDown(event: PointerEvent, panel: Panel) {
+    if (!this.interactive) return;
+    event.preventDefault();
+    const captionEl = event.currentTarget as HTMLElement;
+    const panelEl = captionEl.closest('.panel') as HTMLElement | null;
+    if (!panelEl) return;
+    captionEl.setPointerCapture(event.pointerId);
+
+    const panelRect = panelEl.getBoundingClientRect();
+    const captionRect = captionEl.getBoundingClientRect();
+    const grabDxPct = ((event.clientX - captionRect.left) / panelRect.width) * 100;
+    const grabDyPct = ((event.clientY - captionRect.top) / panelRect.height) * 100;
+
+    let captionX = panel.captionX ?? DEFAULT_CAPTION.x;
+    let captionY = panel.captionY ?? DEFAULT_CAPTION.y;
+
+    const onMove = (e: PointerEvent) => {
+      captionX = clamp(((e.clientX - panelRect.left) / panelRect.width) * 100 - grabDxPct, 0, 85);
+      captionY = clamp(((e.clientY - panelRect.top) / panelRect.height) * 100 - grabDyPct, 0, 92);
+      captionEl.style.left = captionX + '%';
+      captionEl.style.top = captionY + '%';
+      captionEl.style.right = 'auto';
+    };
+    const finish = () => {
+      captionEl.removeEventListener('pointermove', onMove);
+      captionEl.removeEventListener('pointerup', finish);
+      captionEl.removeEventListener('pointercancel', finish);
+      captionEl.removeEventListener('lostpointercapture', finish);
+      this.zone.run(() => this.captionReposition.emit({ panel, captionX, captionY }));
+    };
+    this.zone.runOutsideAngular(() => {
+      captionEl.addEventListener('pointermove', onMove);
+      captionEl.addEventListener('pointerup', finish);
+      captionEl.addEventListener('pointercancel', finish);
+      captionEl.addEventListener('lostpointercapture', finish);
     });
   }
 }

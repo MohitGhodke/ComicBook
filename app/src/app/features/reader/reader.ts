@@ -10,11 +10,15 @@ import {
   ViewEncapsulation,
   signal,
   computed,
+  effect,
   inject,
 } from '@angular/core';
 import { PageFlip } from 'page-flip';
-import { ReaderPage } from '../../core/models/comic.model';
+import { BubbleFontSize, ReaderPage } from '../../core/models/comic.model';
 import { tailWedgePoints } from '../../core/util/bubble-tail';
+import { fontSizeClass } from '../../core/util/font-size';
+import { FontSizeConfig } from '../../core/services/font-size.config';
+import { FontSizeSlider } from '../shared/font-size-slider';
 
 const NAV_H = 60; // nav bar + gap
 const PAD = 16; // breathing room
@@ -31,15 +35,18 @@ const ZOOM_FACTOR = 1.5;
  */
 @Component({
   selector: 'app-reader',
-  imports: [],
+  imports: [FontSizeSlider],
   templateUrl: './reader.html',
   styleUrl: './reader.scss',
   encapsulation: ViewEncapsulation.None,
 })
 export class Reader implements AfterViewInit, OnChanges, OnDestroy {
   private zone = inject(NgZone);
+  private fontSizeConfig = inject(FontSizeConfig);
 
   @Input() pages: ReaderPage[] = [];
+  /** The book's own bubble/caption text size — the reader's slider defaults to this. */
+  @Input() bookFontSize: BubbleFontSize = 'large';
 
   @ViewChild('scene', { static: true }) sceneRef!: ElementRef<HTMLDivElement>;
   @ViewChild('bookHost', { static: true }) bookHostRef!: ElementRef<HTMLDivElement>;
@@ -48,8 +55,18 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
   readonly totalPages = signal(0);
   readonly currentIndex = signal(0);
   readonly jumpOpen = signal(false);
+  readonly fontPanelOpen = signal(false);
   readonly storytellerActive = signal(false);
   readonly loading = signal(true);
+
+  readonly readerFontOverride = this.fontSizeConfig.readerOverride;
+  /** Mirrors the `bookFontSize` @Input as a signal so `effectiveFontSize` reacts to it. */
+  private readonly bookFontSizeSig = signal<BubbleFontSize>('large');
+  /** 'auto' defers to the book's own choice; otherwise the reader's override wins. */
+  readonly effectiveFontSize = computed<BubbleFontSize>(() => {
+    const override = this.readerFontOverride();
+    return override === 'auto' ? this.bookFontSizeSig() : override;
+  });
 
   readonly pageInfo = computed(() => `${this.currentIndex() + 1} / ${this.totalPages()}`);
   readonly dots = computed(() => Array.from({ length: this.totalPages() }, (_, i) => i));
@@ -80,9 +97,23 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
     if (e.key === 'ArrowLeft') this.prev();
     if (e.key === 'Escape') {
       this.closeJump();
+      this.closeFontPanel();
       if (this.storytellerActive()) this.toggleStoryteller();
     }
   };
+
+  constructor() {
+    // Live font-size changes (the reader's own slider) shouldn't blow away the
+    // current flip state, so patch existing `.panel-grid`s in place instead of
+    // rebuilding the book — `buildBook()` already bakes in the current size
+    // for every other rebuild (resize, new pages, ...).
+    effect(() => {
+      const cls = fontSizeClass(this.effectiveFontSize());
+      this.bookHostRef?.nativeElement.querySelectorAll('.panel-grid').forEach((el) => {
+        el.className = el.className.replace(/\bfont-size-\S+/g, '').trim() + ' ' + cls;
+      });
+    });
+  }
 
   ngAfterViewInit() {
     this.viewReady = true;
@@ -94,6 +125,7 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
   }
 
   ngOnChanges() {
+    this.bookFontSizeSig.set(this.bookFontSize);
     if (this.viewReady) this.preloadAndInit();
   }
 
@@ -170,7 +202,7 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
         const layout = p.layout || 'splash';
         if (layout !== 'splash') div.classList.add('has-panels');
         const grid = document.createElement('div');
-        grid.className = 'panel-grid layout-' + layout;
+        grid.className = 'panel-grid layout-' + layout + ' ' + fontSizeClass(this.effectiveFontSize());
         (p.panels || []).forEach((panel) => {
           const fig = document.createElement('figure');
           fig.className = 'panel';
@@ -178,11 +210,18 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
           img.src = panel.src;
           img.alt = '';
           fig.appendChild(img);
-          // Narration caption — a box at the top, printed alongside any dialogue.
+          // Narration caption — a box at the top by default, printed alongside
+          // any dialogue; the author can drag it elsewhere (e.g. off a face).
           if (panel.narration?.trim()) {
             const cap = document.createElement('div');
             cap.className = 'caption';
             cap.textContent = panel.narration.trim();
+            if (panel.captionX != null) {
+              cap.classList.add('custom-pos');
+              cap.style.left = panel.captionX + '%';
+              cap.style.top = panel.captionY + '%';
+              cap.style.right = 'auto';
+            }
             fig.appendChild(cap);
           }
           if (panel.dialogue) {
@@ -272,8 +311,14 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
     this.pageFlip?.turnToPage(idx);
   }
 
-  toggleJump() { this.jumpOpen.update((v) => !v); }
+  toggleJump() { this.jumpOpen.update((v) => !v); this.fontPanelOpen.set(false); }
   closeJump() { this.jumpOpen.set(false); }
+
+  // ── Reader-side text size override ───────────────────────────────────────────
+  toggleFontPanel() { this.fontPanelOpen.update((v) => !v); this.jumpOpen.set(false); }
+  closeFontPanel() { this.fontPanelOpen.set(false); }
+  setReaderFontSize(size: BubbleFontSize) { this.fontSizeConfig.setReaderOverride(size); }
+  resetReaderFontSize() { this.fontSizeConfig.setReaderOverride('auto'); }
 
   // ── Storyteller mode ─────────────────────────────────────────────────────
   toggleStoryteller() {

@@ -11,5 +11,5 @@
   </div>
 } @else if (ready()) {
   <button class="back-fab btn" (click)="backToShelf()" title="Back to shelf">← Shelf</button>
-  <app-reader [pages]="pages()" />
+  <app-reader [pages]="pages()" [bookFontSize]="bookFontSize()" />
 }

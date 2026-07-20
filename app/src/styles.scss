@@ -24,6 +24,10 @@
   --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-comic: 'Comic Neue', var(--font-display), sans-serif;
+
+  /* Bubble/caption text size — overridden per panel-grid by .font-size-*. */
+  --bubble-font-size:  4.3cqi;
+  --caption-font-size: 3.8cqi;
 }
 
 /* Dark palette — same cool-neutral system, inverted. The rendered comic page
@@ -162,6 +166,13 @@ a { color: inherit; }
 .panel-grid.layout-splash .panel { border: none; border-radius: 0; background: var(--card); }
 .panel-grid.layout-splash .panel > img { object-fit: contain; }
 
+/* Bubble/caption text size — author-chosen (or reader-overridden), applied
+   per page since a .panel-grid is one rendered page. 'large' matches the
+   original fixed cqi values (also the :root fallback above). */
+.panel-grid.font-size-small  { --bubble-font-size: 3.3cqi; --caption-font-size: 2.9cqi; }
+.panel-grid.font-size-medium { --bubble-font-size: 3.8cqi; --caption-font-size: 3.3cqi; }
+.panel-grid.font-size-large  { --bubble-font-size: 4.3cqi; --caption-font-size: 3.8cqi; }
+
 .layout-strip3   { grid-template-columns: 1fr; grid-template-rows: repeat(3, 1fr); }
 .layout-grid4    { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 .layout-feature3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1.5fr 1fr; }
@@ -181,7 +192,7 @@ a { color: inherit; }
   font-family: var(--font-comic);
   font-weight: 400;
   line-height: 1.25;
-  font-size: 4.3cqi;        /* scales with the page's width */
+  font-size: var(--bubble-font-size);   /* scales with the page's width */
   box-shadow: 1.5px 1.5px 0 rgba(0, 0, 0, 0.16);
   z-index: 2;
 }
@@ -241,9 +252,15 @@ a { color: inherit; }
   font-style: italic;
   font-weight: 400;
   line-height: 1.3;
-  font-size: 3.8cqi;
+  font-size: var(--caption-font-size);
   box-shadow: 1.5px 1.5px 0 rgba(0, 0, 0, 0.16);
   z-index: 2;
+}
+/* Dragged (or draggable-in-editor) caption — a positioned card instead of a
+   banner spanning the top edge, so it can be moved clear of a character's face. */
+.panel .caption.custom-pos {
+  right: auto;
+  max-width: 80%;
 }
 /* Speaker label inside a bubble — small, so who is talking is always clear. */
 .panel .bubble-speaker {
@@ -276,12 +293,14 @@ a { color: inherit; }
   vector-effect: non-scaling-stroke;
 }
 
-/* Editing affordances — bubble drag + freeform tail handle (creator only). */
-.panel.interactive .bubble:not(.narration) {
+/* Editing affordances — bubble/caption drag + freeform tail handle (creator only). */
+.panel.interactive .bubble:not(.narration),
+.panel.interactive .caption {
   cursor: grab;
   touch-action: none;
 }
-.panel.interactive .bubble:not(.narration):active { cursor: grabbing; }
+.panel.interactive .bubble:not(.narration):active,
+.panel.interactive .caption:active { cursor: grabbing; }
 .panel.interactive .tail-handle {
   position: absolute;
   width: 0.9em; height: 0.9em;

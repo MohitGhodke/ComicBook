@@ -108,6 +108,8 @@ export class ComicLibraryService {
             tailX: panel.tailX,
             tailY: panel.tailY,
             tailAngle: panel.tailAngle,
+            captionX: panel.captionX,
+            captionY: panel.captionY,
           });
         }
         if (panels.length === 0) continue; // nothing to render yet

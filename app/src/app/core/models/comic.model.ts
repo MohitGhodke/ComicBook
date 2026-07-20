@@ -47,6 +47,9 @@ export type LayoutId = 'splash' | 'strip3' | 'grid4' | 'feature3' | 'six';
  */
 export type BubbleKind = 'speech' | 'thought' | 'narration';
 
+/** Text size for every bubble/caption in a book — 'large' matches the original fixed size. */
+export type BubbleFontSize = 'small' | 'medium' | 'large';
+
 /** One frame of a comic page. The app draws the frame; the art is borderless. */
 export interface Panel {
   id: string;
@@ -62,6 +65,9 @@ export interface Panel {
    * with `dialogue` so a panel can have both a caption and a spoken line.
    */
   narration?: string;
+  /** Custom caption position, top-left anchor as % of the panel. Unset = default (spans the top edge). */
+  captionX?: number;
+  captionY?: number;
   /** Who speaks `dialogue` (a cast name) — so it's clear who is talking. */
   speaker?: string;
   /** The panel artwork. Optional while being authored. */
@@ -135,6 +141,8 @@ export interface ComicBook {
   styleSeed?: number;
   /** Chosen art style id (see art-styles.ts). Every image prompt adapts to it. */
   styleId?: string;
+  /** Text size for every bubble/caption in the book. Unset = 'large' (the original fixed size). */
+  bubbleFontSize?: BubbleFontSize;
   createdAt: number;
   updatedAt: number;
   /**
@@ -159,6 +167,8 @@ export interface ReaderPanel {
   tailX?: number;
   tailY?: number;
   tailAngle?: number;
+  captionX?: number;
+  captionY?: number;
 }
 
 /** A single spread page the Reader renders, flattened from a ComicBook. */

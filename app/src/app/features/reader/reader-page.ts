@@ -2,7 +2,7 @@ import { Component, inject, signal, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Reader } from './reader';
 import { ComicLibraryService } from '../../core/services/comic-library.service';
-import { ReaderPage } from '../../core/models/comic.model';
+import { BubbleFontSize, ReaderPage } from '../../core/models/comic.model';
 
 @Component({
   selector: 'app-reader-page',
@@ -17,6 +17,7 @@ export class ReaderPageComponent implements OnInit {
 
   readonly pages = signal<ReaderPage[]>([]);
   readonly title = signal('');
+  readonly bookFontSize = signal<BubbleFontSize>('large');
   readonly notFound = signal(false);
   readonly ready = signal(false);
 
@@ -29,6 +30,7 @@ export class ReaderPageComponent implements OnInit {
       return;
     }
     this.title.set(book.title);
+    this.bookFontSize.set(book.bubbleFontSize ?? 'large');
     this.pages.set(await this.library.toReaderPages(book));
     this.ready.set(true);
   }

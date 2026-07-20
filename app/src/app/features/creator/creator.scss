@@ -110,6 +110,7 @@
 
 /* Step-level AI bar (characters / pages) */
 .ai-bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
 .ai-inline { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--ink-soft); font-size: 0.9rem; }
 .ai-pre { white-space: pre-wrap; }
 .story-count { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; }
@@ -195,8 +196,31 @@
 .page-editor { display: grid; grid-template-columns: 320px 1fr; gap: 1.8rem; align-items: start; }
 .page-edit-col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
 .page-preview-col { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
-.preview-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+/* Two clean rows — label+Aa on top, Layout on its own line below — instead of
+   cramming everything into one row that wraps awkwardly in the narrow sidebar. */
+.preview-head { display: flex; flex-direction: column; gap: 0.5rem; }
+.preview-head-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
 .preview-label { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* Book-wide bubble/caption text size — a small icon that pops a slider open,
+   so it costs no permanent vertical space in the Pages step. */
+.font-size-pop-wrap { position: relative; }
+.font-size-btn {
+  width: 1.9rem; height: 1.9rem; border-radius: 50%;
+  border: 1.5px solid var(--line-2); background: transparent; color: var(--ink-soft);
+  font-family: var(--font-display); font-weight: 700; font-size: 0.75rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.font-size-btn:hover { color: var(--ink); border-color: var(--ink-soft); }
+.font-size-btn.active { color: var(--accent); border-color: var(--accent); }
+.font-size-pop {
+  display: none; position: absolute; top: calc(100% + 10px); right: 0; z-index: 5;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 0.9rem 1rem; box-shadow: var(--shadow-lg); width: 220px;
+  flex-direction: column; gap: 0.6rem;
+}
+.font-size-pop.open { display: flex; }
 
 /* One-panel-at-a-time editor (multiline, room to breathe) */
 .panel-editor { display: flex; flex-direction: column; gap: 0.9rem; }

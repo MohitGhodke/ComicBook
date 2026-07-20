@@ -2,13 +2,14 @@ import { Component, inject, signal, computed, WritableSignal, OnInit } from '@an
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Reader } from '../reader/reader';
-import { PagePreview, BubbleRepositionEvent, TailRepositionEvent } from '../shared/page-preview';
+import { PagePreview, BubbleRepositionEvent, TailRepositionEvent, CaptionRepositionEvent } from '../shared/page-preview';
+import { FontSizeSlider } from '../shared/font-size-slider';
 import { ComicLibraryService } from '../../core/services/comic-library.service';
 import { StorageService } from '../../core/services/storage.service';
 import { PromptService } from '../../core/services/prompt.service';
 import { ComicAssistant, StoryContext, SuggestedCharacter, SuggestedPage, ShapedIdea, PAGE_COUNT_MIN, PAGE_COUNT_MAX } from '../../core/services/ai/comic-assistant';
 import { AiConfig } from '../../core/services/ai/ai.config';
-import { ComicBook, Character, Chapter, Page, Panel, ImageRef, LayoutId, ReaderPage, BubbleKind } from '../../core/models/comic.model';
+import { ComicBook, Character, Chapter, Page, Panel, ImageRef, LayoutId, ReaderPage, BubbleKind, BubbleFontSize } from '../../core/models/comic.model';
 import { StoryBible } from '../../core/models/story-bible.model';
 import { LAYOUTS, newPanel, applyLayout, migratePage } from '../../core/models/layout';
 import { newId } from '../../core/util/id';
@@ -16,6 +17,7 @@ import { timestamp } from '../../core/util/time';
 import { cleanDialogue } from '../../core/util/text';
 import { Draft, emptyDraft, draftHasContent, newStyleSeed } from '../../core/services/draft';
 import { StyleConfig } from '../../core/services/style.config';
+import { FontSizeConfig } from '../../core/services/font-size.config';
 import { ART_STYLES, artStyleById } from '../../core/style/art-styles';
 
 type CoverSide = 'front' | 'back';
@@ -30,7 +32,7 @@ interface StepDef {
 
 @Component({
   selector: 'app-creator',
-  imports: [FormsModule, RouterLink, Reader, PagePreview],
+  imports: [FormsModule, RouterLink, Reader, PagePreview, FontSizeSlider],
   templateUrl: './creator.html',
   styleUrl: './creator.scss',
 })
@@ -43,6 +45,7 @@ export class Creator implements OnInit {
   private assistant = inject(ComicAssistant);
   private aiConfig = inject(AiConfig);
   private styleConfig = inject(StyleConfig);
+  private fontSizeConfig = inject(FontSizeConfig);
 
   /** All selectable art styles + the one this comic uses. */
   readonly artStyles = ART_STYLES;
@@ -87,6 +90,8 @@ export class Creator implements OnInit {
   readonly defaultLayout: LayoutId = 'strip3';
   /** Index of the page being edited in the page-at-a-time Pages step. */
   readonly pageIndex = signal(0);
+  /** Bubble/caption text-size popover (Pages step) — closed by default to save vertical space. */
+  readonly fontPanelOpen = signal(false);
 
   // On-device AI assist
   readonly aiAvailable = signal(false);
@@ -137,6 +142,7 @@ export class Creator implements OnInit {
       this.createdAt = timestamp();
       this.draft = emptyDraft();
       this.draft.styleId = this.styleConfig.defaultStyleId(); // capture the current default
+      this.draft.bubbleFontSize = this.fontSizeConfig.defaultForNewBooks();
     }
     await this.refreshThumbs();
     this.probeAi();
@@ -164,6 +170,7 @@ export class Creator implements OnInit {
       // Older books have no seed — assign one now so their art can be cohesive.
       styleSeed: book.styleSeed ?? newStyleSeed(),
       styleId: book.styleId ?? this.styleConfig.defaultStyleId(),
+      bubbleFontSize: book.bubbleFontSize ?? 'large',
     };
   }
 
@@ -426,6 +433,7 @@ export class Creator implements OnInit {
       draft: this.isDraftBook(),
       styleSeed: this.draft.styleSeed,
       styleId: this.draft.styleId,
+      bubbleFontSize: this.draft.bubbleFontSize,
       bible: this.bible ?? undefined,
       createdAt: this.createdAt,
       updatedAt: timestamp(),
@@ -580,6 +588,14 @@ export class Creator implements OnInit {
     this.persist();
   }
 
+  /** Book-wide bubble/caption text size — affects every panel across every page. */
+  setBubbleFontSize(size: BubbleFontSize) {
+    this.draft.bubbleFontSize = size;
+    this.persist();
+  }
+  toggleFontPanel() { this.fontPanelOpen.update((v) => !v); }
+  closeFontPanel() { this.fontPanelOpen.set(false); }
+
   setSpeaker(panel: Panel, speaker: string) {
     panel.speaker = speaker || undefined;
     this.persist();
@@ -594,6 +610,12 @@ export class Creator implements OnInit {
   onTailReposition(e: TailRepositionEvent) {
     e.panel.tailX = e.tailX;
     e.panel.tailY = e.tailY;
+    this.persist();
+  }
+
+  onCaptionReposition(e: CaptionRepositionEvent) {
+    e.panel.captionX = e.captionX;
+    e.panel.captionY = e.captionY;
     this.persist();
   }
 

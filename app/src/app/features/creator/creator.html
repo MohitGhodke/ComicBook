@@ -305,6 +305,7 @@
               }
             } @else { <span class="ai-off faint">● AI offline</span> }
           </div>
+
           @if (aiError()) { <div class="ai-card ai-error">{{ aiError() }}</div> }
           @if (storySuggestions()) {
             <div class="ai-card ai-suggestion">
@@ -368,7 +369,18 @@
               <div class="page-editor">
                 <aside class="page-preview-col">
                   <div class="preview-head">
-                    <span class="preview-label faint">Click a panel to edit it</span>
+                    <div class="preview-head-row">
+                      <span class="preview-label faint">Click a panel to edit it</span>
+                      <div class="font-size-pop-wrap">
+                        <button type="button" class="font-size-btn" [class.active]="fontPanelOpen()"
+                                (click)="toggleFontPanel()" title="Bubble &amp; caption text size" aria-label="Bubble text size">Aa</button>
+                        <div class="font-size-pop" [class.open]="fontPanelOpen()">
+                          <span class="field-label">Text size <span class="faint">— every page</span></span>
+                          <app-font-size-slider [value]="draft.bubbleFontSize" ariaLabel="Bubble text size"
+                                                 (valueChange)="setBubbleFontSize($event)" />
+                        </div>
+                      </div>
+                    </div>
                     <label class="layout-pick">
                       <span class="field-label">Layout</span>
                       <select class="input tiny-select" [ngModel]="p.layout" (ngModelChange)="changeLayout(p, $event)">
@@ -377,10 +389,12 @@
                     </label>
                   </div>
                   <app-page-preview [page]="p" [thumbs]="thumbs()" [interactive]="true"
+                                    [fontSize]="draft.bubbleFontSize"
                                     [selectedId]="selectedPanel?.id ?? null"
                                     (panelSelect)="selectPanel($event)"
                                     (bubbleReposition)="onBubbleReposition($event)"
-                                    (tailReposition)="onTailReposition($event)" />
+                                    (tailReposition)="onTailReposition($event)"
+                                    (captionReposition)="onCaptionReposition($event)" />
                 </aside>
 
                 <div class="page-edit-col">
@@ -521,6 +535,6 @@
 @if (previewing()) {
   <div class="preview-overlay">
     <button class="back-fab btn" (click)="closePreview()">← Back to editor</button>
-    <app-reader [pages]="previewPages()" />
+    <app-reader [pages]="previewPages()" [bookFontSize]="draft.bubbleFontSize" />
   </div>
 }

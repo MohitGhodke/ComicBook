@@ -32,6 +32,12 @@
   </section>
 
   <section class="block">
+    <h2>Default bubble text size</h2>
+    <p class="muted sub">The size every new comic's speech bubbles, thought bubbles and captions start at. You can still change it per comic, and readers can override it too while reading.</p>
+    <app-font-size-slider [value]="defaultFontSize()" ariaLabel="Default bubble text size" (valueChange)="chooseFontSize($event)" />
+  </section>
+
+  <section class="block">
     <h2>On-device AI server</h2>
     <p class="muted sub">The local OpenAI-compatible server used for writing help (LM Studio, Ollama, mlx-lm). No cloud.</p>
     <label class="field">

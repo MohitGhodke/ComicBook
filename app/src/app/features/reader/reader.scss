@@ -118,6 +118,23 @@
 .book-scene .jump-dot:hover { background: var(--accent); color: #fff; transform: scale(1.15); }
 .book-scene .jump-dot.active { background: var(--accent); color: #fff; }
 
+/* ── Font size ──
+   .jump-panel centers itself (left: 50%) relative to its nearest positioned
+   ancestor — for the page-jump popover that's .book-nav, which happens to
+   look right since page-info-btn sits near the middle of the bar. The Aa
+   button sits off to the side, so its popover needs its OWN positioned
+   wrapper to center on, or it centers on the whole nav bar instead of the
+   button and drifts toward the middle of the toolbar. */
+.book-scene .font-size-wrap { position: relative; display: flex; align-items: center; }
+.book-scene .font-size-btn { font-family: var(--font-display); font-weight: 700; font-size: 0.8rem; }
+.book-scene .font-size-panel { display: none; }
+.book-scene .font-size-panel.open { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+.book-scene .font-size-reset {
+  border: none; background: transparent; color: var(--accent); cursor: pointer;
+  font-family: var(--font-body); font-size: 0.76rem; padding: 0;
+}
+.book-scene .font-size-reset:hover { text-decoration: underline; }
+
 /* ── Storyteller ── */
 .book-scene .storyteller-btn { margin-left: 0.5rem; }
 .book-scene .storyteller-btn.active { background: var(--accent); color: #fff; box-shadow: 0 0 12px rgba(196, 149, 106, 0.5); }
