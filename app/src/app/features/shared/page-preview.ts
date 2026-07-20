@@ -2,6 +2,7 @@ import { Component, EventEmitter, Input, NgZone, Output, inject } from '@angular
 import { NgClass } from '@angular/common';
 import { Page, Panel } from '../../core/models/comic.model';
 import { cleanDialogue } from '../../core/util/text';
+import { DEFAULT_BUBBLE, DEFAULT_TAIL, tailWedgePoints } from '../../core/util/bubble-tail';
 
 export interface BubbleRepositionEvent {
   panel: Panel;
@@ -12,14 +13,7 @@ export interface TailRepositionEvent {
   panel: Panel;
   tailX: number;
   tailY: number;
-  tailAngle: number;
 }
-
-/** Approximate on-screen spot of the fixed CSS default, used only to seed the
- *  drag gesture (grab offset / handle rest position) — not for rendering. */
-const DEFAULT_BUBBLE = { x: 7, y: 78 };
-/** Matches the old `::after` tail exactly: `rotate(45deg)` == `rotate(90 - 45)`. */
-const DEFAULT_TAIL = { x: 14, y: 93, angle: 90 };
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
@@ -67,10 +61,9 @@ function clamp(n: number, min: number, max: number): number {
                      [style.bottom]="panel.bubbleY != null ? 'auto' : null"
                      (pointerdown)="onBubbleDown($event, panel)">@if (panel.speaker?.trim()) {<span class="bubble-speaker">{{ panel.speaker!.trim() }}</span>}{{ line }}</div>
                 @if (canDragTail(panel)) {
-                  <div class="bubble-tail"
-                       [style.left.%]="panel.tailX ?? tailDefaults.x"
-                       [style.top.%]="panel.tailY ?? tailDefaults.y"
-                       [style.transform]="tailTransform(panel)"></div>
+                  <svg class="tail-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <polygon [attr.points]="tailPoints(panel)"></polygon>
+                  </svg>
                 }
                 @if (interactive && panel.dialogueKind !== 'narration') {
                   <div class="tail-handle"
@@ -135,9 +128,13 @@ export class PagePreview {
     return panel.dialogueKind !== 'narration' && (this.interactive || panel.tailX != null);
   }
 
-  tailTransform(panel: Panel): string {
-    const angle = panel.tailAngle ?? this.tailDefaults.angle;
-    return `rotate(${angle - 45}deg)`;
+  tailPoints(panel: Panel): string {
+    return tailWedgePoints(
+      panel.bubbleX,
+      panel.bubbleY,
+      panel.tailX ?? this.tailDefaults.x,
+      panel.tailY ?? this.tailDefaults.y,
+    );
   }
 
   onBubbleDown(event: PointerEvent, panel: Panel) {
@@ -147,6 +144,7 @@ export class PagePreview {
     const panelEl = bubbleEl.closest('.panel') as HTMLElement | null;
     if (!panelEl) return;
     bubbleEl.setPointerCapture(event.pointerId);
+    const polygonEl = panelEl.querySelector('.tail-svg polygon') as SVGPolygonElement | null;
 
     const panelRect = panelEl.getBoundingClientRect();
     const bubbleRect = bubbleEl.getBoundingClientRect();
@@ -162,6 +160,11 @@ export class PagePreview {
       bubbleEl.style.left = bubbleX + '%';
       bubbleEl.style.top = bubbleY + '%';
       bubbleEl.style.bottom = 'auto';
+      if (polygonEl) {
+        const tailX = panel.tailX ?? DEFAULT_TAIL.x;
+        const tailY = panel.tailY ?? DEFAULT_TAIL.y;
+        polygonEl.setAttribute('points', tailWedgePoints(bubbleX, bubbleY, tailX, tailY));
+      }
     };
     const finish = () => {
       bubbleEl.removeEventListener('pointermove', onMove);
@@ -184,27 +187,22 @@ export class PagePreview {
     const handleEl = event.currentTarget as HTMLElement;
     const panelEl = handleEl.closest('.panel') as HTMLElement | null;
     if (!panelEl) return;
-    const tailEl = panelEl.querySelector('.bubble-tail') as HTMLElement | null;
+    const polygonEl = panelEl.querySelector('.tail-svg polygon') as SVGPolygonElement | null;
     handleEl.setPointerCapture(event.pointerId);
 
     const panelRect = panelEl.getBoundingClientRect();
-    const anchor = { x: panel.bubbleX ?? DEFAULT_BUBBLE.x, y: panel.bubbleY ?? DEFAULT_BUBBLE.y };
+    const bubbleX = panel.bubbleX ?? DEFAULT_BUBBLE.x;
+    const bubbleY = panel.bubbleY ?? DEFAULT_BUBBLE.y;
     let tailX = panel.tailX ?? DEFAULT_TAIL.x;
     let tailY = panel.tailY ?? DEFAULT_TAIL.y;
-    let tailAngle = panel.tailAngle ?? DEFAULT_TAIL.angle;
 
     const onMove = (e: PointerEvent) => {
       tailX = clamp(((e.clientX - panelRect.left) / panelRect.width) * 100, 0, 98);
       tailY = clamp(((e.clientY - panelRect.top) / panelRect.height) * 100, 0, 98);
-      const dxPx = ((tailX - anchor.x) / 100) * panelRect.width;
-      const dyPx = ((tailY - anchor.y) / 100) * panelRect.height;
-      tailAngle = (Math.atan2(dyPx, dxPx) * 180) / Math.PI;
       handleEl.style.left = tailX + '%';
       handleEl.style.top = tailY + '%';
-      if (tailEl) {
-        tailEl.style.left = tailX + '%';
-        tailEl.style.top = tailY + '%';
-        tailEl.style.transform = `rotate(${tailAngle - 45}deg)`;
+      if (polygonEl) {
+        polygonEl.setAttribute('points', tailWedgePoints(bubbleX, bubbleY, tailX, tailY));
       }
     };
     const finish = () => {
@@ -212,7 +210,7 @@ export class PagePreview {
       handleEl.removeEventListener('pointerup', finish);
       handleEl.removeEventListener('pointercancel', finish);
       handleEl.removeEventListener('lostpointercapture', finish);
-      this.zone.run(() => this.tailReposition.emit({ panel, tailX, tailY, tailAngle }));
+      this.zone.run(() => this.tailReposition.emit({ panel, tailX, tailY }));
     };
     this.zone.runOutsideAngular(() => {
       handleEl.addEventListener('pointermove', onMove);

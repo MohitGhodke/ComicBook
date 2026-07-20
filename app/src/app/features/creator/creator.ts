@@ -594,7 +594,6 @@ export class Creator implements OnInit {
   onTailReposition(e: TailRepositionEvent) {
     e.panel.tailX = e.tailX;
     e.panel.tailY = e.tailY;
-    e.panel.tailAngle = e.tailAngle;
     this.persist();
   }
 

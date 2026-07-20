@@ -72,14 +72,15 @@ export interface Panel {
   bubbleX?: number;
   bubbleY?: number;
   /**
-   * Custom tail-tip position as % of the panel, and its final rotation in
-   * degrees. The angle is computed once at drag time (using the panel's real
-   * pixel aspect ratio) and stored rather than recomputed on every render, so
-   * the reader doesn't need to re-derive per-layout pixel ratios. Unset =
-   * default fixed pseudo-element tail.
+   * Custom tail-tip position as % of the panel (where the tail points — e.g.
+   * a character's mouth). Unset = default fixed pseudo-element tail. The
+   * wedge connecting the bubble to this tip is derived at render time from
+   * `bubbleX`/`bubbleY` + this point (see core/util/bubble-tail.ts), so the
+   * tail always tracks the bubble even after it's dragged.
    */
   tailX?: number;
   tailY?: number;
+  /** @deprecated no longer written — direction is derived from bubbleX/Y + tailX/Y at render time. Kept for reading older saved comics. */
   tailAngle?: number;
 }
 

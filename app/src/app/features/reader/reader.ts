@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import { PageFlip } from 'page-flip';
 import { ReaderPage } from '../../core/models/comic.model';
+import { tailWedgePoints } from '../../core/util/bubble-tail';
 
 const NAV_H = 60; // nav bar + gap
 const PAD = 16; // breathing room
@@ -205,12 +206,15 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
             }
             fig.appendChild(bubble);
             if (hasCustomTail) {
-              const tail = document.createElement('div');
-              tail.className = 'bubble-tail';
-              tail.style.left = panel.tailX + '%';
-              tail.style.top = panel.tailY + '%';
-              tail.style.transform = `rotate(${(panel.tailAngle ?? 90) - 45}deg)`;
-              fig.appendChild(tail);
+              const svgNs = 'http://www.w3.org/2000/svg';
+              const svg = document.createElementNS(svgNs, 'svg');
+              svg.setAttribute('class', 'tail-svg');
+              svg.setAttribute('viewBox', '0 0 100 100');
+              svg.setAttribute('preserveAspectRatio', 'none');
+              const polygon = document.createElementNS(svgNs, 'polygon');
+              polygon.setAttribute('points', tailWedgePoints(panel.bubbleX, panel.bubbleY, panel.tailX!, panel.tailY!));
+              svg.appendChild(polygon);
+              fig.appendChild(svg);
             }
           }
           grid.appendChild(fig);
