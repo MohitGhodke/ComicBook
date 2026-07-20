@@ -10,6 +10,12 @@ import { DEFAULT_STYLE_ID } from '../style/art-styles';
 export interface Draft {
   title: string;
   idea: string;
+  /** The story's world / place (optional — feeds every generation for coherence). */
+  setting: string;
+  /** The time period / era. */
+  era: string;
+  /** Genre + mood. */
+  tone: string;
   author: string;
   characters: Character[];
   /** The interactions / scene beats — becomes the chapter synopsis. */
@@ -30,7 +36,7 @@ export function newStyleSeed(): number {
 
 export function emptyDraft(): Draft {
   return {
-    title: '', idea: '', author: '', characters: [], synopsis: '', pages: [],
+    title: '', idea: '', setting: '', era: '', tone: '', author: '', characters: [], synopsis: '', pages: [],
     styleSeed: newStyleSeed(), styleId: DEFAULT_STYLE_ID,
   };
 }

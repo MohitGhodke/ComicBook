@@ -6,9 +6,10 @@ import { PagePreview, BubbleRepositionEvent, TailRepositionEvent } from '../shar
 import { ComicLibraryService } from '../../core/services/comic-library.service';
 import { StorageService } from '../../core/services/storage.service';
 import { PromptService } from '../../core/services/prompt.service';
-import { ComicAssistant, StoryContext, SuggestedCharacter, SuggestedPage, ShapedIdea } from '../../core/services/ai/comic-assistant';
+import { ComicAssistant, StoryContext, SuggestedCharacter, SuggestedPage, ShapedIdea, PAGE_COUNT_MIN, PAGE_COUNT_MAX } from '../../core/services/ai/comic-assistant';
 import { AiConfig } from '../../core/services/ai/ai.config';
 import { ComicBook, Character, Chapter, Page, Panel, ImageRef, LayoutId, ReaderPage, BubbleKind } from '../../core/models/comic.model';
+import { StoryBible } from '../../core/models/story-bible.model';
 import { LAYOUTS, newPanel, applyLayout, migratePage } from '../../core/models/layout';
 import { newId } from '../../core/util/id';
 import { cleanDialogue } from '../../core/util/text';
@@ -50,6 +51,9 @@ export class Creator implements OnInit {
 
   /** The book being authored — always a real storage id (draft or finished). */
   bookId = '';
+  /** The Story Bible JSON this comic was composed from — the single source of
+   *  truth. Set when the story is generated; persisted on the book. */
+  private bible: StoryBible | null = null;
   /** True while it's still a draft; false once finished / when editing a book. */
   readonly isDraftBook = signal(true);
   readonly isEditing = computed(() => !this.isDraftBook());
@@ -94,6 +98,7 @@ export class Creator implements OnInit {
   // Per-step AI state
   readonly ideaLoading = signal(false);
   readonly ideaSuggestion = signal<ShapedIdea | null>(null);
+  readonly worldLoading = signal(false);
 
   readonly charLoading = signal(false);
   readonly charSuggestions = signal<SuggestedCharacter[] | null>(null);
@@ -105,7 +110,9 @@ export class Creator implements OnInit {
   readonly storyLoading = signal(false);
   readonly storySuggestions = signal<SuggestedPage[] | null>(null);
   readonly storyProgress = signal<{ done: number; total: number } | null>(null);
-  storyboardCount = 6;
+  readonly maxPages = PAGE_COUNT_MAX;
+  /** Interior page count. `null` = let the AI size the book to the story. */
+  storyboardCount: number | null = null;
 
   readonly frontCoverLoading = signal(false);
   readonly frontCoverPrompt = signal<string | null>(null);
@@ -141,9 +148,13 @@ export class Creator implements OnInit {
     this.bookId = book.id;
     this.isDraftBook.set(book.draft ?? false);
     this.createdAt = book.createdAt;
+    this.bible = book.bible ?? null;
     this.draft = {
       title: book.title,
       idea: book.idea ?? '',
+      setting: book.setting ?? '',
+      era: book.era ?? '',
+      tone: book.tone ?? '',
       author: book.author ?? '',
       characters: book.characters ?? [],
       // All chapters' scene beats + pages are edited as one flat sequence.
@@ -182,6 +193,9 @@ export class Creator implements OnInit {
       idea: this.draft.idea,
       characters: this.draft.characters.map((c) => ({ name: c.name, appearance: c.appearance, traits: c.traits })),
       synopsis: this.draft.synopsis,
+      setting: this.draft.setting,
+      era: this.draft.era,
+      tone: this.draft.tone,
     };
   }
 
@@ -229,6 +243,35 @@ export class Creator implements OnInit {
   }
   dismissIdea() { this.ideaSuggestion.set(null); }
 
+  /**
+   * Fill any BLANK world fields (setting / era / tone), and the title if empty,
+   * from the idea — leaving whatever the user already wrote untouched. The world
+   * then flows into every later step (characters, scenes, pages, art) so the
+   * story and its art stay coherent.
+   */
+  async suggestWorld() {
+    if (!this.draft.idea.trim()) return;
+    const dev = await this.run(this.worldLoading, (s) =>
+      this.assistant.developSetup(
+        {
+          premise: this.draft.idea,
+          characters: '',
+          setting: this.draft.setting,
+          era: this.draft.era,
+          tone: this.draft.tone,
+          storyline: '',
+        },
+        s,
+      ),
+    );
+    if (!dev) return;
+    if (!this.draft.setting.trim() && dev.setting) this.draft.setting = dev.setting;
+    if (!this.draft.era.trim() && dev.era) this.draft.era = dev.era;
+    if (!this.draft.tone.trim() && dev.tone) this.draft.tone = dev.tone;
+    if (!this.draft.title.trim() && dev.title) this.draft.title = dev.title;
+    this.persist();
+  }
+
   // Step 2 — Characters
   async suggestCharacters() {
     if (!this.draft.idea.trim()) return;
@@ -275,13 +318,24 @@ export class Creator implements OnInit {
   }
   dismissBeats() { this.beatsSuggestion.set(null); }
 
-  // Step 4 — Pages (storyboard)
+  // Step 4 — Pages (storyboard). Composed through the Story Bible JSON: the whole
+  // story is generated as one source-of-truth tree (world → spine → locked cast →
+  // scenes → sections), which streams back as pages for the preview. The AI also
+  // SIZES the book to the story (unless the author typed a specific page count).
   async storyboard() {
     this.storySuggestions.set(null);
     this.storyProgress.set(null);
-    const count = Math.min(Math.max(this.storyboardCount || 6, 1), 12);
-    const pages = await this.run(this.storyLoading, (s) =>
-      this.assistant.storyboardPages(
+    const bible = await this.run(this.storyLoading, async (s) => {
+      // No manual count → let the editor decide how many pages the story needs
+      // (this runs during the "Outlining your pages…" phase, before per-page work).
+      let count = this.storyboardCount ?? 0;
+      if (count < 2) {
+        count = await this.assistant.suggestPageCount(this.storyContext(), s);
+      } else {
+        count = Math.min(Math.max(Math.round(count), 2), PAGE_COUNT_MAX);
+      }
+      this.storyboardCount = count; // reflect the chosen length in the field
+      return this.assistant.composeStoryBible(
         this.storyContext(),
         count,
         (done, total, latest) => {
@@ -289,10 +343,10 @@ export class Creator implements OnInit {
           this.storySuggestions.update((cur) => [...(cur ?? []), latest]);
         },
         s,
-      ),
-    );
+      );
+    });
     this.storyProgress.set(null);
-    if (pages !== null && this.storySuggestions() === null) this.storySuggestions.set(pages);
+    if (bible) this.bible = bible; // the JSON source of truth, persisted on save
   }
   addStoryboardPages() {
     const sugg = this.storySuggestions() ?? [];
@@ -301,7 +355,13 @@ export class Creator implements OnInit {
     const created: Page[] = sugg.map((sp) => ({
       id: newId('page'),
       layout: sp.layout,
-      panels: sp.panels.map((pl) => newPanel({ description: pl.description, dialogue: cleanDialogue(pl.dialogue), dialogueKind: pl.dialogueKind })),
+      panels: sp.panels.map((pl) => newPanel({
+        description: pl.description,
+        dialogue: cleanDialogue(pl.dialogue),
+        dialogueKind: pl.dialogueKind,
+        narration: pl.narration,
+        speaker: pl.speaker,
+      })),
     }));
     this.draft.pages = [...this.draft.pages, ...created]; // new array reference
     this.storySuggestions.set(null);
@@ -356,6 +416,9 @@ export class Creator implements OnInit {
       id: this.bookId,
       title: this.draft.title.trim() || 'Untitled',
       idea: this.draft.idea.trim(),
+      setting: this.draft.setting.trim() || undefined,
+      era: this.draft.era.trim() || undefined,
+      tone: this.draft.tone.trim() || undefined,
       author: this.draft.author.trim() || undefined,
       coverImageRef: this.draft.coverImageRef,
       backCoverImageRef: this.draft.backCoverImageRef,
@@ -364,6 +427,7 @@ export class Creator implements OnInit {
       draft: this.isDraftBook(),
       styleSeed: this.draft.styleSeed,
       styleId: this.draft.styleId,
+      bible: this.bible ?? undefined,
       createdAt: this.createdAt,
       updatedAt: timestamp(),
     };
@@ -514,6 +578,11 @@ export class Creator implements OnInit {
 
   setBubbleKind(panel: Panel, kind: BubbleKind) {
     panel.dialogueKind = kind;
+    this.persist();
+  }
+
+  setSpeaker(panel: Panel, speaker: string) {
+    panel.speaker = speaker || undefined;
     this.persist();
   }
 

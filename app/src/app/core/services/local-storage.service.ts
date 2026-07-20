@@ -1,11 +1,13 @@
 import { Injectable } from '@angular/core';
 import { openDB, IDBPDatabase } from 'idb';
 import { ComicBook, ImageRef } from '../models/comic.model';
+import { StoryBible } from '../models/story-bible.model';
 import { StorageService } from './storage.service';
 
 const DB_NAME = 'comicbook';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const BOOKS = 'books';
+const BIBLES = 'bibles';
 const IMAGES = 'images';
 
 /**
@@ -25,8 +27,13 @@ export class LocalStorageService extends StorageService {
     if (!this.dbPromise) {
       this.dbPromise = openDB(DB_NAME, DB_VERSION, {
         upgrade(db) {
+          // Idempotent: each store is created only if missing, so the same
+          // callback safely covers a fresh install and any version step.
           if (!db.objectStoreNames.contains(BOOKS)) {
             db.createObjectStore(BOOKS, { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains(BIBLES)) {
+            db.createObjectStore(BIBLES, { keyPath: 'id' });
           }
           if (!db.objectStoreNames.contains(IMAGES)) {
             db.createObjectStore(IMAGES);
@@ -56,6 +63,27 @@ export class LocalStorageService extends StorageService {
   async deleteBook(id: string): Promise<void> {
     const db = await this.db();
     await db.delete(BOOKS, id);
+  }
+
+  async listBibles(): Promise<StoryBible[]> {
+    const db = await this.db();
+    const bibles = (await db.getAll(BIBLES)) as StoryBible[];
+    return bibles.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async getBible(id: string): Promise<StoryBible | undefined> {
+    const db = await this.db();
+    return (await db.get(BIBLES, id)) as StoryBible | undefined;
+  }
+
+  async saveBible(bible: StoryBible): Promise<void> {
+    const db = await this.db();
+    await db.put(BIBLES, bible);
+  }
+
+  async deleteBible(id: string): Promise<void> {
+    const db = await this.db();
+    await db.delete(BIBLES, id);
   }
 
   async putImage(blob: Blob): Promise<ImageRef> {

@@ -7,6 +7,8 @@
  * Blob Storage URLs later without touching any UI code.
  */
 
+import type { StoryBible } from './story-bible.model';
+
 export type ImageRefKind = 'local' | 'azure' | 'asset';
 
 export interface ImageRef {
@@ -54,6 +56,14 @@ export interface Panel {
   dialogue?: string;
   /** How the line is lettered (speech / thought / narration). Defaults to speech. */
   dialogueKind?: BubbleKind;
+  /**
+   * A narration/caption printed ON the panel (a box, not a bubble) — carries the
+   * scene's premise, a time/place bridge, or context the art can't show. Coexists
+   * with `dialogue` so a panel can have both a caption and a spoken line.
+   */
+  narration?: string;
+  /** Who speaks `dialogue` (a cast name) — so it's clear who is talking. */
+  speaker?: string;
   /** The panel artwork. Optional while being authored. */
   imageRef?: ImageRef;
   /** Static, copy-paste image prompt for this panel. */
@@ -105,6 +115,12 @@ export interface ComicBook {
   title: string;
   /** The core message / theme the book communicates. */
   idea: string;
+  /** The story's world / place — anchors both prose and art so they don't drift. */
+  setting?: string;
+  /** The time period / era. */
+  era?: string;
+  /** Genre + mood the whole book carries. */
+  tone?: string;
   author?: string;
   coverImageRef?: ImageRef;
   backCoverImageRef?: ImageRef;
@@ -120,6 +136,12 @@ export interface ComicBook {
   styleId?: string;
   createdAt: number;
   updatedAt: number;
+  /**
+   * The Story Bible — the single JSON source of truth this comic was generated
+   * from (world → spine → locked cast → scenes → sections). When present, the
+   * story was composed by the bible engine; the pages above are its projection.
+   */
+  bible?: StoryBible;
 }
 
 /** A resolved panel for the reader: displayable image URL + clean dialogue. */
@@ -127,6 +149,10 @@ export interface ReaderPanel {
   src: string;
   dialogue?: string;
   dialogueKind?: BubbleKind;
+  /** Narration caption printed on the panel (coexists with dialogue). */
+  narration?: string;
+  /** Who speaks the dialogue line. */
+  speaker?: string;
   bubbleX?: number;
   bubbleY?: number;
   tailX?: number;

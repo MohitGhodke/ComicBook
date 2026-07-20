@@ -88,6 +88,45 @@
             <input class="input" [(ngModel)]="draft.title" (ngModelChange)="persist()"
                    placeholder="Leave blank and refine your idea, or type your own" />
           </label>
+
+          <!-- The world — feeds every later step so the story and art stay coherent. -->
+          <div class="field">
+            <div class="field-label-row">
+              <span class="field-label">The world <span class="faint">(optional — sets place, time &amp; mood for the whole book)</span></span>
+              <div class="ai-controls">
+                @if (aiAvailable()) {
+                  @if (worldLoading()) {
+                    <button class="btn small ai-btn" (click)="cancelAi()">Cancel</button>
+                  } @else {
+                    <button class="btn small ai-btn" (click)="suggestWorld()" [disabled]="!draft.idea.trim()"
+                            title="Fill any blank world fields from your idea">✨ Suggest the world</button>
+                  }
+                }
+              </div>
+            </div>
+            @if (worldLoading()) {
+              <div class="ai-card ai-thinking"><span class="ai-spinner"></span> Imagining the world…</div>
+            }
+            <div class="world-grid">
+              <label class="field">
+                <span class="field-label">Setting <span class="faint">— where</span></span>
+                <input class="input" [(ngModel)]="draft.setting" (ngModelChange)="persist()"
+                       placeholder="The world or place, e.g. “A frozen archipelago of whaling towns.”" />
+              </label>
+              <label class="field">
+                <span class="field-label">Era / time <span class="faint">— when</span></span>
+                <input class="input" [(ngModel)]="draft.era" (ngModelChange)="persist()"
+                       placeholder="The time period, e.g. “Late 18th century.”" />
+              </label>
+              <label class="field">
+                <span class="field-label">Tone <span class="faint">— genre &amp; mood</span></span>
+                <input class="input" [(ngModel)]="draft.tone" (ngModelChange)="persist()"
+                       placeholder="The feel, e.g. “bleak, hopeful survival drama.”" />
+              </label>
+            </div>
+            <span class="hint faint">Leave any blank and “✨ Suggest the world” will fill it from your idea. You can edit anything.</span>
+          </div>
+
           <label class="field">
             <span class="field-label">Author <span class="faint">(optional)</span></span>
             <input class="input" [(ngModel)]="draft.author" (ngModelChange)="persist()" placeholder="Your name" />
@@ -258,9 +297,9 @@
                 <button class="btn small btn--ghost" (click)="cancelAi()">Cancel</button>
               } @else {
                 <button class="btn small ai-btn" (click)="storyboard()" [disabled]="!draft.idea.trim()"
-                        title="Turn your idea, characters and beats into a page-by-page storyboard">✨ Storyboard</button>
-                <label class="story-count faint">pages
-                  <input class="input tiny" type="number" min="1" max="12" [(ngModel)]="storyboardCount" />
+                        title="Turn your idea, characters and beats into a page-by-page storyboard — the AI sizes the book to the story">✨ Storyboard</button>
+                <label class="story-count faint" title="Leave on Auto to let the AI size the book to your story, or type an exact number">pages
+                  <input class="input tiny" type="number" min="2" [max]="maxPages" step="2" placeholder="Auto" [(ngModel)]="storyboardCount" />
                 </label>
                 @if (!draft.idea.trim()) { <span class="faint hint">Write your big idea first.</span> }
               }
@@ -290,7 +329,10 @@
                   <div class="sugg-page-body">
                     <span class="faint">{{ p.layout }} · {{ p.panels.length }} panel(s)</span>
                     @for (pl of p.panels; track $index) {
-                      <span class="sugg-cap">• {{ pl.description }}@if (pl.dialogue) { <span class="sugg-dlg faint"> — “{{ pl.dialogue }}”</span> }</span>
+                      <span class="sugg-cap">
+                        @if (pl.narration) { <span class="sugg-narr">▸ {{ pl.narration }}</span> }
+                        • {{ pl.description }}@if (pl.dialogue) { <span class="sugg-dlg faint"> — {{ pl.speaker || 'Someone' }}: “{{ pl.dialogue }}”</span> }
+                      </span>
                     }
                   </div>
                 </div>
@@ -375,18 +417,30 @@
                         <textarea class="textarea" [(ngModel)]="panel.description" (ngModelChange)="persist()"
                                   placeholder="Describe what this panel shows — the shot, who's in it, what they're doing, the setting and lighting…"></textarea>
                       </label>
+                      <label class="field">
+                        <span class="field-label">Narration <span class="faint">— optional caption printed on the panel (scene premise / context)</span></span>
+                        <input class="input" [(ngModel)]="panel.narration" (ngModelChange)="persist()"
+                               placeholder="A caption box, e.g. “Dawn on the salt flats. The last well has run dry.”" />
+                      </label>
                       <div class="field">
                         <div class="field-label-row">
                           <span class="field-label">Dialogue <span class="faint">(what's lettered on the panel)</span></span>
-                          <select class="input tiny-select" [ngModel]="panel.dialogueKind || 'speech'" (ngModelChange)="setBubbleKind(panel, $event)">
-                            <option value="speech">💬 Speech</option>
-                            <option value="thought">💭 Thought</option>
-                            <option value="narration">▭ Narration</option>
-                          </select>
+                          <div class="ai-controls">
+                            <select class="input tiny-select" [ngModel]="panel.speaker || ''" (ngModelChange)="setSpeaker(panel, $event)"
+                                    title="Who says this line">
+                              <option value="">— speaker —</option>
+                              @for (c of draft.characters; track c.id) {
+                                @if (c.name.trim()) { <option [value]="c.name">{{ c.name }}</option> }
+                              }
+                            </select>
+                            <select class="input tiny-select" [ngModel]="panel.dialogueKind || 'speech'" (ngModelChange)="setBubbleKind(panel, $event)">
+                              <option value="speech">💬 Speech</option>
+                              <option value="thought">💭 Thought</option>
+                            </select>
+                          </div>
                         </div>
                         <textarea class="textarea" [(ngModel)]="panel.dialogue" (ngModelChange)="persist()"
                                   [placeholder]="panel.dialogueKind === 'thought' ? 'A private thought — leave empty for a silent panel'
-                                                : panel.dialogueKind === 'narration' ? 'A caption, e.g. “Later that night…”'
                                                 : 'Goes in the speech bubble — leave empty for a silent panel'"></textarea>
                       </div>
                     </div>

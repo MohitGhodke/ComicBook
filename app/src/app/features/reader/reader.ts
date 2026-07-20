@@ -177,12 +177,27 @@ export class Reader implements AfterViewInit, OnChanges, OnDestroy {
           img.src = panel.src;
           img.alt = '';
           fig.appendChild(img);
+          // Narration caption — a box at the top, printed alongside any dialogue.
+          if (panel.narration?.trim()) {
+            const cap = document.createElement('div');
+            cap.className = 'caption';
+            cap.textContent = panel.narration.trim();
+            fig.appendChild(cap);
+          }
           if (panel.dialogue) {
             const bubble = document.createElement('div');
             const kind = panel.dialogueKind && panel.dialogueKind !== 'speech' ? ' ' + panel.dialogueKind : '';
             const hasCustomTail = panel.dialogueKind !== 'narration' && panel.tailX != null;
             bubble.className = 'bubble' + kind + (hasCustomTail ? ' custom-tail' : '');
-            bubble.textContent = panel.dialogue;
+            if (panel.speaker?.trim()) {
+              const who = document.createElement('span');
+              who.className = 'bubble-speaker';
+              who.textContent = panel.speaker.trim();
+              bubble.appendChild(who);
+              bubble.appendChild(document.createTextNode(panel.dialogue));
+            } else {
+              bubble.textContent = panel.dialogue;
+            }
             if (panel.bubbleX != null) {
               bubble.style.left = panel.bubbleX + '%';
               bubble.style.top = panel.bubbleY + '%';

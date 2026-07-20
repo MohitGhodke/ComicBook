@@ -74,6 +74,12 @@
 .tall { min-height: 13rem; }
 .empty { padding: 1.5rem 0; }
 
+/* The world sub-fields: Setting full width, Era + Tone side by side. */
+.world-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1rem; }
+.world-grid > .field { gap: 0.3rem; }
+.world-grid > .field:first-child { grid-column: 1 / -1; }
+@media (max-width: 560px) { .world-grid { grid-template-columns: 1fr; } }
+
 /* ── AI assist ── */
 .field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; min-height: 1.9rem; }
 .ai-controls { display: flex; align-items: center; gap: 0.5rem; }

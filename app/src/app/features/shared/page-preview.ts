@@ -54,6 +54,9 @@ function clamp(n: number, min: number, max: number): number {
               } @else {
                 <div class="panel-empty">Panel {{ $index + 1 }}</div>
               }
+              @if (panel.narration?.trim()) {
+                <div class="caption">{{ panel.narration!.trim() }}</div>
+              }
               @if (clean(panel.dialogue); as line) {
                 <div class="bubble"
                      [class.thought]="panel.dialogueKind === 'thought'"
@@ -62,7 +65,7 @@ function clamp(n: number, min: number, max: number): number {
                      [style.left.%]="panel.bubbleX"
                      [style.top.%]="panel.bubbleY"
                      [style.bottom]="panel.bubbleY != null ? 'auto' : null"
-                     (pointerdown)="onBubbleDown($event, panel)">{{ line }}</div>
+                     (pointerdown)="onBubbleDown($event, panel)">@if (panel.speaker?.trim()) {<span class="bubble-speaker">{{ panel.speaker!.trim() }}</span>}{{ line }}</div>
                 @if (canDragTail(panel)) {
                   <div class="bubble-tail"
                        [style.left.%]="panel.tailX ?? tailDefaults.x"

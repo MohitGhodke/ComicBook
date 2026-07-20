@@ -5,12 +5,24 @@ import { ArtStyle } from '../../style/art-styles';
 import { cleanDialogue } from '../../util/text';
 import { BubbleKind, LayoutId } from '../../models/comic.model';
 import { LAYOUTS, panelCountFor } from '../../models/layout';
+import {
+  StoryBible, Scene, Section, BibleCharacter, ContinuityState,
+  STORY_BIBLE_SCHEMA_VERSION, userField, aiField, emptyField,
+} from '../../models/story-bible.model';
+import { newId } from '../../util/id';
+import { timestamp } from '../../util/time';
 
 /** The story so far — passed into every helper so each step builds on the last. */
 export interface StoryContext {
   idea: string;
   characters: { name: string; appearance?: string; traits?: string }[];
   synopsis?: string;
+  /** The story's world / place — kept in every prompt so nothing drifts out of it. */
+  setting?: string;
+  /** The time period / era. */
+  era?: string;
+  /** Genre + mood. */
+  tone?: string;
 }
 
 export interface SuggestedCharacter {
@@ -35,6 +47,10 @@ export interface SuggestedPanel {
   description: string;
   dialogue: string;
   dialogueKind: BubbleKind;
+  /** Narration caption on the panel (scene premise / bridge / context). */
+  narration: string;
+  /** Who speaks the dialogue line (cast name). */
+  speaker: string;
 }
 
 export interface SuggestedPage {
@@ -59,6 +75,55 @@ const SHAPED_IDEA_SCHEMA = {
       logline: { type: 'string' },
     },
     required: ['title', 'logline'],
+  },
+};
+
+/** The guided-intake fields, as raw strings (whatever the user has typed so far). */
+export interface SetupInput {
+  premise: string;
+  characters: string;
+  setting: string;
+  era: string;
+  tone: string;
+  storyline: string;
+}
+
+/** A complete, coherent story foundation developed from the premise + any provided fields. */
+export interface DevelopedSetup {
+  title: string;
+  setting: string;
+  era: string;
+  tone: string;
+  storyline: string;
+  characters: string;
+}
+
+const DEVELOPED_SETUP_SCHEMA = {
+  name: 'developed_setup',
+  schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      setting: { type: 'string' },
+      era: { type: 'string' },
+      tone: { type: 'string' },
+      storyline: { type: 'string' },
+      characters: { type: 'string' },
+    },
+    required: ['title', 'setting', 'era', 'tone', 'storyline', 'characters'],
+  },
+};
+
+/** Bounds for AI-suggested interior page counts (always an EVEN number in range). */
+export const PAGE_COUNT_MIN = 4;
+export const PAGE_COUNT_MAX = 30;
+
+const PAGE_COUNT_SCHEMA = {
+  name: 'page_count',
+  schema: {
+    type: 'object',
+    properties: { pages: { type: 'integer' } },
+    required: ['pages'],
   },
 };
 
@@ -179,10 +244,12 @@ const PAGE_PLAN_SCHEMA = {
           type: 'object',
           properties: {
             beat: { type: 'string' },
+            narration: { type: 'string' },
+            speaker: { type: 'string' },
             dialogue: { type: 'string' },
             dialogueKind: { type: 'string', enum: ['speech', 'thought', 'narration'] },
           },
-          required: ['beat', 'dialogue', 'dialogueKind'],
+          required: ['beat', 'narration', 'speaker', 'dialogue', 'dialogueKind'],
         },
       },
     },
@@ -195,6 +262,10 @@ interface PanelPlanSlot {
   beat: string;
   dialogue: string;
   dialogueKind: BubbleKind;
+  /** Narration caption for the panel (scene premise / bridge / context). */
+  narration: string;
+  /** Who speaks the dialogue line (cast name). */
+  speaker: string;
 }
 
 /**
@@ -226,6 +297,12 @@ interface StoryboardMemory {
    * what to continue, and the book reads as disconnected scenes.
    */
   prevSummary: string;
+  /**
+   * Cast names the reader has already MET, in order of first appearance. A
+   * character NOT in this list is a newcomer on the page that introduces them —
+   * and their entrance must be set up, not sprung (the "who is this?" problem).
+   */
+  introduced: string[];
 }
 
 /** Model sometimes leaks the dialogueKind enum (or a "none" filler) into the dialogue field. */
@@ -295,7 +372,72 @@ export class ComicAssistant {
     return this.ai.listModels();
   }
 
-  // ── Step 1: Idea (the entry point) ───────────────────────────────────────────
+  // ── Step 1: Story Setup — develop a coherent foundation from the premise ─────
+  /**
+   * From the writer's premise plus whatever intake fields they filled, develop a
+   * single COHERENT story foundation — inventing only what's missing and building
+   * it around what they already wrote. This is the Story Bible's root: every
+   * later level (spine → characters → scenes → sections) is anchored to it, so
+   * getting one cohesive world/era/tone here is what stops downstream drift.
+   *
+   * Returns proposed values for ALL fields; the caller applies them only to the
+   * fields the user left empty/unlocked, preserving authored input and provenance.
+   */
+  async developSetup(input: SetupInput, signal?: AbortSignal): Promise<DevelopedSetup> {
+    const system =
+      'You are a comic book story development editor. From the PREMISE and any details the writer already gave, ' +
+      'develop ONE coherent story foundation. Fill in every element that is missing so the whole thing reads as a ' +
+      'single world and a single story. HARD RULES: (1) keep everything the writer already wrote — never contradict ' +
+      'or replace a provided value; build the rest around it. (2) Make SETTING (the place/world), ERA (the time ' +
+      'period), and TONE (genre + mood) clearly belong together. (3) STORYLINE is the arc in 2–3 sentences — a ' +
+      'beginning, a turn, and where it heads — consistent with the premise. (4) CHARACTERS is a short roster: 2–5 ' +
+      'names each with a one-line role the premise needs. (5) TITLE is short and evocative (2–5 words, no subtitle, ' +
+      'no quotes). Be concrete and vivid but concise. Return ONLY a JSON object of the form ' +
+      '{"title":"","setting":"","era":"","tone":"","storyline":"","characters":""}.';
+    const provided = (label: string, v: string) =>
+      `${label}: ${v.trim() ? v.trim() : '— (missing — you invent it)'}`;
+    const user =
+      [
+        provided('PREMISE', input.premise),
+        provided('CHARACTERS', input.characters),
+        provided('SETTING', input.setting),
+        provided('ERA', input.era),
+        provided('TONE', input.tone),
+        provided('STORYLINE', input.storyline),
+      ].join('\n') + '\n\nDevelop the complete, coherent foundation as JSON.';
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.7, maxTokens: 1200, schema: DEVELOPED_SETUP_SCHEMA, signal },
+    );
+    const p = parseJsonObject(raw);
+    const str = (v: any) => String(v ?? '').trim();
+    // The model sometimes returns `characters` as a roster ARRAY (of objects or
+    // strings) rather than one string — flatten it to a readable "Name — role" list.
+    const roster = (v: any): string => {
+      if (!Array.isArray(v)) return str(v);
+      return v
+        .map((c) =>
+          typeof c === 'string'
+            ? c.trim()
+            : [str(c?.name), str(c?.role ?? c?.description)].filter(Boolean).join(' — '),
+        )
+        .filter(Boolean)
+        .join('; ');
+    };
+    return {
+      title: str(p?.title),
+      setting: str(p?.setting),
+      era: str(p?.era),
+      tone: str(p?.tone),
+      storyline: str(p?.storyline),
+      characters: roster(p?.characters),
+    };
+  }
+
+  // ── (legacy) Idea refinement — single logline + title ────────────────────────
   /**
    * Refine a rough idea into a polished logline AND propose a comic title. The
    * idea is the starting point — the user shouldn't have to name the book first;
@@ -493,6 +635,41 @@ export class ComicAssistant {
     return stripCraftLabels(raw);
   }
 
+  // ── Step 4: Pages — how long should the book be? ─────────────────────────────
+  /**
+   * Let the editor size the book to the STORY: enough pages to tell it completely
+   * and at a good pace — never cut short, never padded. Returns an EVEN interior
+   * page count in [MIN, MAX] (even so the book pairs into spreads and carries its
+   * own front + back cover).
+   */
+  async suggestPageCount(ctx: StoryContext, signal?: AbortSignal): Promise<number> {
+    const system =
+      'You are a comic book editor deciding the LENGTH of a comic. From the story below, decide how many interior ' +
+      'comic PAGES it needs to be told COMPLETELY and at a good pace — every important beat gets room to land, but ' +
+      'nothing is padded, stretched, or repeated. HEURISTIC: roughly ONE to TWO pages per distinct scene/beat the ' +
+      'story actually has. Count the real beats (use the STORY BEATS if given). A single-scene incident needs only ' +
+      '4–6 pages — do NOT inflate a simple story. A full short-story arc is ~10–18; only a genuinely large, ' +
+      'multi-turn epic approaches 30. Do not pick a big number just to be safe. The number MUST be EVEN. ' +
+      `Reply with ONLY a JSON object {"pages": N} where N is an even integer between ${PAGE_COUNT_MIN} and ${PAGE_COUNT_MAX}.`;
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: this.contextBlock(ctx) + '\n\nHow many pages does this story need? Return the JSON.' },
+      ],
+      { temperature: 0.4, maxTokens: 500, schema: PAGE_COUNT_SCHEMA, signal },
+    );
+    const parsed = parseJsonObject(raw);
+    let n = Number(parsed?.pages);
+    if (!Number.isFinite(n)) {
+      const m = String(raw).match(/\d+/); // fall back to the first number in the reply
+      n = m ? Number(m[0]) : 6;
+    }
+    n = Math.round(n);
+    n = Math.min(PAGE_COUNT_MAX, Math.max(PAGE_COUNT_MIN, n));
+    if (n % 2 !== 0) n += 1; // even — the book pairs into spreads
+    return Math.min(PAGE_COUNT_MAX, n);
+  }
+
   // ── Step 4: Pages — batched "plan → expand", same as characters ──────────────
   /**
    * Storyboard in two phases so a small model stays coherent over many pages:
@@ -507,7 +684,7 @@ export class ComicAssistant {
     signal?: AbortSignal,
   ): Promise<SuggestedPage[]> {
     const beats = await this.planStoryboard(ctx, count, signal);
-    const memory: StoryboardMemory = { layouts: [], lines: [], lastImage: '', prevSummary: '' };
+    const memory: StoryboardMemory = { layouts: [], lines: [], lastImage: '', prevSummary: '', introduced: [] };
     const out: SuggestedPage[] = [];
     for (let i = 0; i < beats.length; i++) {
       // Each page sees the whole outline PLUS what earlier pages actually wrote:
@@ -523,6 +700,42 @@ export class ComicAssistant {
       onProgress?.(i + 1, beats.length, page);
     }
     return out;
+  }
+
+  /**
+   * Compose the whole story as ONE {@link StoryBible} JSON — the single source of
+   * truth. It generates every level from the same tree so the story stays a
+   * single thread and the cast stays locked (no strangers appear):
+   *   world + locked cast (from ctx) → spine → scenes (each mapped to a beat,
+   *   carrying the present cast) → sections (panels) → art briefs.
+   *
+   * Streams each finished scene as a page via `onProgress`, exactly like
+   * {@link storyboardPages}, so the wizard preview fills in live. The returned
+   * bible is persisted on the book and projected to the reader.
+   */
+  async composeStoryBible(
+    ctx: StoryContext,
+    count: number,
+    onProgress?: PageProgress,
+    signal?: AbortSignal,
+  ): Promise<StoryBible> {
+    // Dramatic architecture first, so it's captured in the bible (not discarded).
+    const spine = await this.planStorySpine(ctx, signal);
+    // Then the scene outline (cast already canonicalised to the locked cast).
+    const beats = await this.planStoryboard(ctx, count, signal);
+    const memory: StoryboardMemory = { layouts: [], lines: [], lastImage: '', prevSummary: '', introduced: [] };
+    const scenes: Scene[] = [];
+    for (let i = 0; i < beats.length; i++) {
+      const page = await this.writePage(ctx, beats, i, memory, signal);
+      memory.layouts.push(page.layout);
+      for (const p of page.panels) if (p.dialogue) memory.lines.push(p.dialogue);
+      const last = page.panels[page.panels.length - 1];
+      if (last?.description) memory.lastImage = last.description;
+      memory.prevSummary = beats[i]?.summary ?? '';
+      scenes.push(beatToScene(beats[i], page));
+      onProgress?.(i + 1, beats.length, page);
+    }
+    return assembleBible(ctx, spine, scenes);
   }
 
   /**
@@ -646,16 +859,30 @@ export class ComicAssistant {
     const pageCast = ctx.characters.filter(
       (c) => c.name?.trim() && c.appearance?.trim() && assigned.some((n) => nameInText(n, c.name ?? '') || nameInText(c.name ?? '', n)),
     );
-    const plan = await this.planPage(ctx, beats, pageIdx, memory, signal);
+    // Who appears here for the FIRST time — their entrance must be introduced,
+    // not sprung on the reader ("who is this?"). Names are canonicalised to the cast.
+    const pageCastNames = pageCast.map((c) => c.name!.trim());
+    const newcomers = pageCastNames.filter(
+      (n) => !memory.introduced.some((s) => s.toLowerCase() === n.toLowerCase()),
+    );
+    const plan = await this.planPage(ctx, beats, pageIdx, memory, newcomers, signal);
+    // Mark them met, so later pages don't re-introduce them.
+    for (const n of newcomers) memory.introduced.push(n);
     const want = panelCountFor(plan.layout);
     const panels: SuggestedPanel[] = [];
     // Each panel also sees the one drawn just before it, so the camera varies.
     let prevImage = memory.lastImage;
     for (let j = 0; j < want; j++) {
-      const slot = plan.panels[j] ?? { beat: summary, dialogue: '', dialogueKind: 'speech' as BubbleKind };
+      const slot = plan.panels[j] ?? { beat: summary, dialogue: '', dialogueKind: 'speech' as BubbleKind, narration: '', speaker: '' };
       const description = (await this.describePanel(ctx, summary, slot, j, want, prevImage, pageCast, signal)) || slot.beat || summary;
       prevImage = description;
-      panels.push({ description, dialogue: slot.dialogue, dialogueKind: slot.dialogueKind });
+      panels.push({
+        description,
+        dialogue: slot.dialogue,
+        dialogueKind: slot.dialogueKind,
+        narration: slot.narration,
+        speaker: slot.speaker,
+      });
     }
     return { layout: plan.layout, panels };
   }
@@ -671,6 +898,7 @@ export class ComicAssistant {
     beats: PageBeat[],
     pageIdx: number,
     memory: StoryboardMemory,
+    newcomers: string[],
     signal?: AbortSignal,
   ): Promise<{ layout: LayoutId; panels: PanelPlanSlot[] }> {
     const total = beats.length;
@@ -692,11 +920,18 @@ export class ComicAssistant {
       'HARD RULE — ONE SCENE PER PAGE: every panel on this page happens in the SAME location within the same ' +
       'continuous moment. Never cut to a different place, a different time, or a parallel group of characters ' +
       'mid-page. If the beat implies travel or several places, show only the destination — the most dramatic one.\n' +
-      'BRIDGE SCENE CHANGES: change place or time ONLY when this page\'s beat truly requires it, and let the change ' +
-      'be MOTIVATED by what just happened — the characters are here because of the previous page, not by accident. ' +
-      'When you do jump, panel 1 must carry a short narration caption naming the new place/time (e.g. "Two days ' +
-      'later — the launch site.") with dialogueKind "narration", so the reader follows it. A jump with no cause is ' +
-      'forbidden; a scene that simply continues needs no caption.\n' +
+      'HARD RULE — INTRODUCE NEWCOMERS: if this page brings in a character the reader has NOT met yet (see NEW ON ' +
+      'THIS PAGE below), you must INTRODUCE them, not spring them. Show HOW they enter and make clear WHO they are ' +
+      'and their relationship to the others — through the action, the narration caption, and their first line. A ' +
+      'stranger must never simply appear already hugging or talking to the protagonist with no setup; the reader ' +
+      'should never think "who is this?".\n' +
+      'CAPTION THE SCENE: panel 1 of this page must carry a NARRATION caption (the "narration" field) that sets up ' +
+      'the scene in one vivid sentence — where and when we are, and what is at stake in this moment. This is the ' +
+      'premise the reader needs to understand the page; write it with care, like the opening line of a comic page. ' +
+      'If this page is a jump in place or time from the one before, that same panel-1 caption also names the new ' +
+      'place/time and MUST be motivated by what just happened (a jump with no cause is forbidden). Add a short ' +
+      'narration caption on a later panel too ONLY when the picture and dialogue cannot convey something essential ' +
+      '(a passage of time, an unseen consequence, an inner realisation). Otherwise leave "narration" as "".\n' +
       'FIRST choose the panel layout that fits this moment:\n' +
       '- splash = one big dramatic full-page panel (a reveal, a huge emotional beat)\n' +
       '- strip3 = 3 stacked panels (steady beats, a short exchange)\n' +
@@ -707,18 +942,28 @@ export class ComicAssistant {
       'unless this moment truly demands it.\n' +
       'THEN write one entry per panel:\n' +
       '- "beat": ONE concrete sentence of what visibly HAPPENS in that panel — the action and who is in frame ' +
-      '(name them). Every panel must show a DIFFERENT action; the page must move from its first panel to its last. ' +
+      '(name them). CAST LOCK: you may ONLY name characters from the story\'s defined cast (listed in CHARACTERS). ' +
+      'NEVER introduce a new named person, and never add an unnamed stranger (a guard, a servant, a crowd) — if the ' +
+      'action seems to need someone else, use an existing cast member or stage it without them. ' +
+      'Every panel must show a DIFFERENT action; the page must move from its first panel to its last. ' +
       'Do NOT put every character in every panel — cut like a film editor: a close-up on one face, an insert of ' +
       'hands or an object, a two-shot, and only occasionally the full group.\n' +
-      '- "dialogue": the one line spoken or thought in that panel, 12 words or fewer. Characters must talk TO each ' +
-      'other — alternate speakers across panels like a real conversation, and react to what was just said. ' +
-      'Words only: NEVER a speaker name or "Name:" label, never two characters\' words in one panel, no stage ' +
-      'directions, no parentheses () or brackets []. Leave "" ONLY for a deliberate silent beat. ' +
+      '- "narration": the caption box for this panel (see CAPTION THE SCENE above). Panel 1 always has one; other ' +
+      'panels usually leave it "". It is NOT dialogue — it is the narrator\'s voice.\n' +
+      '- "speaker": the EXACT cast name of the character who says/thinks "dialogue", so it is always clear WHO is ' +
+      'talking. Leave "" when the panel is silent or has only narration.\n' +
+      '- "dialogue": the one line THAT speaker says or thinks, 12 words or fewer. It must sound like a REAL PERSON ' +
+      'reacting to THIS exact moment and to the line just before it, and fit who they are and who they are talking ' +
+      'to. FORBIDDEN: witty one-liners, puns, aphorisms, or clever quips dropped in for flavour (e.g. "Numbers are ' +
+      'like bad dates" — a real friend does not talk like a stand-up comedian). The exchange across the page must ' +
+      'read as ONE connected conversation where each line answers the last. Words only: NEVER put the speaker name ' +
+      'or a "Name:" label inside the dialogue, never two characters\' words in one panel, no stage directions, no ' +
+      'parentheses () or brackets []. Leave "" ONLY for a deliberate silent beat. ' +
       'NEVER reuse a line from LINES ALREADY SPOKEN — every line in the book is said exactly once.\n' +
-      '- "dialogueKind": "speech" = said aloud; "thought" = private inner thought; "narration" = a short ' +
-      'scene-setting caption like "Later, on the rooftop." (use sparingly). Use "speech" when dialogue is "".\n' +
+      '- "dialogueKind": "speech" = said aloud; "thought" = private inner thought. (Scene captions go in ' +
+      '"narration", not here.) Use "speech" when dialogue is "".\n' +
       'The number of panels MUST match the layout (splash=1, strip3=3, grid4=4, feature3=3, six=6). ' +
-      'Return ONLY {"layout":"","panels":[{"beat":"","dialogue":"","dialogueKind":"speech"}]}.';
+      'Return ONLY {"layout":"","panels":[{"beat":"","narration":"","speaker":"","dialogue":"","dialogueKind":"speech"}]}.';
     const user =
       this.contextBlock(ctx) +
       `\n\nFULL STORY OUTLINE (all ${total} pages, in order):\n${outline}` +
@@ -744,6 +989,17 @@ export class ComicAssistant {
       (pageCharacters.length
         ? `\n\nCHARACTERS ON THIS PAGE — you MUST name EACH of these in at least one panel's "beat": ${pageCharacters.join(', ')}`
         : '') +
+      (newcomers.length
+        ? `\n\nNEW ON THIS PAGE — the reader has NOT met ${
+            newcomers.length === 1 ? 'this character' : 'these characters'
+          } yet. INTRODUCE them here (show their entrance, who they are, and their relationship to the others) — do ` +
+          `not have them appear already mid-conversation or mid-hug with no setup:\n${newcomers
+            .map((n) => {
+              const c = ctx.characters.find((x) => (x.name ?? '').trim() === n);
+              return `- ${n}${c?.traits?.trim() ? ` — ${c.traits.trim()}` : ''}`;
+            })
+            .join('\n')}`
+        : '') +
       `\n\nWrite ONLY page ${index} of ${total} — its beat: ${summary}\nScript this page as JSON.`;
     const raw = await this.ai.chat(
       [
@@ -762,16 +1018,24 @@ export class ComicAssistant {
       else if (layout === 'strip3') layout = 'feature3';
     }
     const rawPanels = Array.isArray(parsed?.panels) ? parsed.panels : [];
+    const castNames = ctx.characters.map((c) => (c.name ?? '').trim()).filter(Boolean);
     const panels: PanelPlanSlot[] = rawPanels
       .map((p: any) => {
         const dialogue = cleanDialogue(String(p?.dialogue ?? ''));
+        // Keep only a speaker that is actually in the cast (canonicalised).
+        const rawSpeaker = String(p?.speaker ?? '').trim();
+        const speaker = castNames.find((n) => nameInText(rawSpeaker, n) || nameInText(n, rawSpeaker)) ?? '';
+        const narration = String(p?.narration ?? '').trim();
         return {
           beat: String(p?.beat ?? '').trim(),
           dialogue: DIALOGUE_JUNK.test(dialogue) ? '' : dialogue,
+          // A caption a hair short of "..." junk is dropped like dialogue junk.
+          narration: DIALOGUE_JUNK.test(narration) ? '' : narration,
+          speaker,
           dialogueKind: validBubbleKind(p?.dialogueKind),
         };
       })
-      .filter((p: PanelPlanSlot) => p.beat.length > 0 || p.dialogue.length > 0);
+      .filter((p: PanelPlanSlot) => p.beat.length > 0 || p.dialogue.length > 0 || p.narration.length > 0);
     // Backstop the coverage guarantee: any character this page must feature but
     // that the model failed to name gets written into a panel beat, so the art
     // brief renders them (charactersNamedIn keys off the beat text).
@@ -810,7 +1074,9 @@ export class ComicAssistant {
       'time of day and lighting. One paragraph, 40–80 words. Never mention the plot, feelings, sound, the past or ' +
       'future, or anything off-screen; never put written text, captions or speech inside the image. Choose a ' +
       'DIFFERENT camera angle or distance than the previous panel so the page has visual rhythm. ' +
-      'Show ONLY the characters this panel\'s action names — do NOT add the rest of the cast to the frame. ' +
+      'Show ONLY the characters this panel\'s action names — do NOT add the rest of the cast to the frame, and NEVER ' +
+      'invent any other person: no extra bystanders, guards, soldiers, servants, or background crowds may appear. ' +
+      'If the panel names no character, show only the setting, empty of people. ' +
       'Return ONLY the paragraph — no preamble, no quotes, no JSON.';
     // Only hand the model the characters this panel actually involves — giving
     // it the whole cast every time is how every frame becomes the same group
@@ -825,13 +1091,19 @@ export class ComicAssistant {
     const cast = scope
       .map((c) => `- ${c.name!.trim()}: ${c.appearance!.trim()}`)
       .join('\n');
+    // The shared world — pinned into every panel so the setting/era doesn't drift
+    // from frame to frame (the "ruins → marble palace" failure).
+    const world = [ctx.setting?.trim(), ctx.era?.trim()].filter(Boolean).join(' · ');
     const user =
+      (world ? `WORLD (every panel is set in this exact world — keep it consistent): ${world}\n\n` : '') +
       (cast ? `CHARACTERS (keep each looking exactly like this):\n${cast}\n\n` : '') +
       `SCENE (this page): ${pageSummary}\n` +
       `THIS PANEL (${index + 1} of ${total}) SHOWS: ${slot.beat || pageSummary}\n` +
       (slot.dialogue
-        ? `While this happens, a character is ${slot.dialogueKind === 'thought' ? 'thinking' : 'saying'}: ` +
-          `"${slot.dialogue}" — convey it through expression and body language only; no text in the image.\n`
+        ? `While this happens, ${slot.speaker?.trim() ? slot.speaker.trim() : 'a character'} is ` +
+          `${slot.dialogueKind === 'thought' ? 'thinking' : 'saying'}: "${slot.dialogue}" — show it on ${
+            slot.speaker?.trim() ? 'their' : 'the character\'s'
+          } face and body language only; put NO text, letters, or speech bubbles in the image.\n`
         : '') +
       (prevImage ? `\nPREVIOUS PANEL, for contrast — pick a different camera: ${prevImage}\n` : '') +
       '\nWrite the art brief for this one panel.';
@@ -951,6 +1223,10 @@ export class ComicAssistant {
   private contextBlock(ctx: StoryContext): string {
     const lines: string[] = [];
     if (ctx.idea?.trim()) lines.push(`IDEA: ${ctx.idea.trim()}`);
+    // The locked world — every step inherits it, so prose and art stay coherent.
+    if (ctx.setting?.trim()) lines.push(`SETTING: ${ctx.setting.trim()}`);
+    if (ctx.era?.trim()) lines.push(`ERA: ${ctx.era.trim()}`);
+    if (ctx.tone?.trim()) lines.push(`TONE: ${ctx.tone.trim()}`);
     const named = ctx.characters.filter((c) => c.name?.trim());
     if (named.length) {
       lines.push('CHARACTERS:');
@@ -1056,6 +1332,80 @@ function ensureCastAssigned(pages: PageBeat[], castNames: string[]): PageBeat[] 
     assigned.add(name.toLowerCase());
   }
   return pages;
+}
+
+/** A blank continuity state — filled properly by the scene-state work later. */
+function emptyState(): ContinuityState {
+  return { location: '', time: '', present: [], props: {}, mood: '', knowledge: '' };
+}
+
+/** One generated page (beat + panels) → a Bible scene with sections. */
+function beatToScene(beat: PageBeat, page: SuggestedPage): Scene {
+  const entry = emptyState();
+  entry.present = [...(beat?.characters ?? [])];
+  const sections: Section[] = page.panels.map((panel) => ({
+    id: newId('section'),
+    moment: aiField(panel.description ?? ''),
+    cameraHint: aiField(''),
+    speaker: aiField(panel.speaker ?? ''),
+    line: aiField(panel.dialogue ?? ''),
+    dialogueKind: panel.dialogueKind ?? 'speech',
+    narration: aiField(panel.narration ?? ''),
+    artPrompt: aiField(panel.description ?? ''),
+  }));
+  return {
+    id: newId('scene'),
+    goal: aiField(beat?.summary ?? ''),
+    conflict: aiField(''),
+    turn: aiField(''),
+    entryState: aiField(entry),
+    exitState: aiField(emptyState()),
+    layout: page.layout,
+    sections,
+  };
+}
+
+/** Assemble the full Story Bible JSON from the world, the spine, and the scenes. */
+function assembleBible(ctx: StoryContext, spine: StorySpine, scenes: Scene[]): StoryBible {
+  const now = timestamp();
+  const roster = ctx.characters.map((c) => c.name?.trim()).filter(Boolean).join(', ');
+  const characters: BibleCharacter[] = ctx.characters
+    .filter((c) => c.name?.trim())
+    .map((c) => ({
+      id: newId('char'),
+      name: userField(c.name.trim()),
+      appearance: userField(c.appearance?.trim() ?? ''),
+      traits: userField(c.traits?.trim() ?? ''),
+      role: emptyField(''),
+      arc: emptyField(''),
+    }));
+  return {
+    schemaVersion: STORY_BIBLE_SCHEMA_VERSION,
+    id: newId('bible'),
+    title: emptyField(''),
+    createdAt: now,
+    updatedAt: now,
+    setup: {
+      premise: userField(ctx.idea?.trim() ?? ''),
+      characters: userField(roster),
+      setting: userField(ctx.setting?.trim() ?? ''),
+      era: userField(ctx.era?.trim() ?? ''),
+      tone: userField(ctx.tone?.trim() ?? ''),
+      storyline: userField(ctx.synopsis?.trim() ?? ''),
+    },
+    spine: {
+      logline: aiField(ctx.idea?.trim() ?? ''),
+      theme: emptyField(''),
+      dramaticQuestion: aiField(spine.dramaticQuestion),
+      climax: aiField(spine.climax),
+      resolution: aiField(spine.resolution),
+      setups: aiField(spine.setups.map((s) => ({ plant: s.plant, payoff: s.payoff }))),
+      visualStyle: { palette: '', rendering: '', styleId: '' },
+    },
+    characters,
+    scenes,
+    draft: true,
+  };
 }
 
 /** Parse a JSON object from a model reply, tolerating stray prose or code fences. */

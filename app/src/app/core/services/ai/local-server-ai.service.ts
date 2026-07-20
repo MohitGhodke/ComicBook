@@ -63,7 +63,10 @@ export class LocalServerAiService extends AiService {
       max_tokens: maxTokens,
       stream: false,
     };
-    if (opts.schema) {
+    // Structured output is opt-in: grammar-constrained decoding degrades some
+    // local models into "…" filler. When off (the default), callers still ask
+    // for JSON in the prompt and parse defensively. See AiConfig.structuredOutput.
+    if (opts.schema && this.cfg.structuredOutput) {
       body['response_format'] = {
         type: 'json_schema',
         json_schema: { name: opts.schema.name, strict: true, schema: opts.schema.schema },

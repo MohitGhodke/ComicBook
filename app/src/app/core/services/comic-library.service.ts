@@ -101,6 +101,8 @@ export class ComicLibraryService {
             src: await this.storage.resolveUrl(panel.imageRef),
             dialogue: cleanDialogue(panel.dialogue),
             dialogueKind: panel.dialogueKind ?? 'speech',
+            narration: panel.narration,
+            speaker: panel.speaker,
             bubbleX: panel.bubbleX,
             bubbleY: panel.bubbleY,
             tailX: panel.tailX,

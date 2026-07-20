@@ -220,6 +220,35 @@ a { color: inherit; }
 .panel .bubble.narration::after,
 .panel .bubble.narration::before { display: none; }
 
+/* Narration caption box — printed at the top of the panel, ALONGSIDE any speech
+   bubble (the bubble defaults to the lower area), so a panel can carry both the
+   scene's context and a spoken line. */
+.panel .caption {
+  position: absolute;
+  left: 4%; right: 4%; top: 4%;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: 0.2em;
+  padding: 0.3em 0.5em;
+  font-family: var(--font-body);
+  font-style: italic;
+  font-weight: 500;
+  line-height: 1.25;
+  font-size: 3.4cqi;
+  box-shadow: 1.5px 1.5px 0 rgba(0, 0, 0, 0.16);
+  z-index: 2;
+}
+/* Speaker label inside a bubble — small, so who is talking is always clear. */
+.panel .bubble-speaker {
+  display: block;
+  font-size: 0.72em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  margin-bottom: 0.05em;
+}
+
 /* Custom (dragged) tail replaces the fixed pseudo-element tail. */
 .panel .bubble.custom-tail::after,
 .panel .bubble.custom-tail::before { display: none; }
