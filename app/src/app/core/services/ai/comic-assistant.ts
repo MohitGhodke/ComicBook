@@ -64,6 +64,12 @@ export interface ShapedIdea {
   title: string;
   /** The refined premise/logline. */
   logline: string;
+  /** The world/place the story happens in. */
+  setting: string;
+  /** The time period. */
+  era: string;
+  /** Genre + mood. */
+  tone: string;
 }
 
 const SHAPED_IDEA_SCHEMA = {
@@ -73,44 +79,11 @@ const SHAPED_IDEA_SCHEMA = {
     properties: {
       title: { type: 'string' },
       logline: { type: 'string' },
-    },
-    required: ['title', 'logline'],
-  },
-};
-
-/** The guided-intake fields, as raw strings (whatever the user has typed so far). */
-export interface SetupInput {
-  premise: string;
-  characters: string;
-  setting: string;
-  era: string;
-  tone: string;
-  storyline: string;
-}
-
-/** A complete, coherent story foundation developed from the premise + any provided fields. */
-export interface DevelopedSetup {
-  title: string;
-  setting: string;
-  era: string;
-  tone: string;
-  storyline: string;
-  characters: string;
-}
-
-const DEVELOPED_SETUP_SCHEMA = {
-  name: 'developed_setup',
-  schema: {
-    type: 'object',
-    properties: {
-      title: { type: 'string' },
       setting: { type: 'string' },
       era: { type: 'string' },
       tone: { type: 'string' },
-      storyline: { type: 'string' },
-      characters: { type: 'string' },
     },
-    required: ['title', 'setting', 'era', 'tone', 'storyline', 'characters'],
+    required: ['title', 'logline', 'setting', 'era', 'tone'],
   },
 };
 
@@ -240,6 +213,30 @@ const PAGE_PLAN_SCHEMA = {
   },
 };
 
+/**
+ * The continuity pass (one call per scene, BEFORE its panels are written). Given
+ * where the previous scene ended and this scene's beat, it fixes the concrete,
+ * physical world-state — the single place, the time, who is on stage, and the
+ * CAUSAL link back to the previous scene. This is the anti-teleport anchor: it is
+ * what stops an "inside the hut" scene from being drawn before the "let's go to
+ * the hut" scene, and what pins every panel's art to one real location.
+ */
+const SCENE_STATE_SCHEMA = {
+  name: 'scene_state',
+  schema: {
+    type: 'object',
+    properties: {
+      location: { type: 'string' },
+      time: { type: 'string' },
+      present: { type: 'array', items: { type: 'string' } },
+      mood: { type: 'string' },
+      continuesFrom: { type: 'string' },
+      reveals: { type: 'string' },
+    },
+    required: ['location', 'time', 'present', 'continuesFrom', 'reveals'],
+  },
+};
+
 /** One planned panel slot: the action beat plus its line, before the art brief. */
 interface PanelPlanSlot {
   beat: string;
@@ -355,95 +352,54 @@ export class ComicAssistant {
     return this.ai.listModels();
   }
 
-  // ── Step 1: Story Setup — develop a coherent foundation from the premise ─────
+  // ── Step 1: Idea — refine the premise AND develop the world in one pass ──────
   /**
-   * From the writer's premise plus whatever intake fields they filled, develop a
-   * single COHERENT story foundation — inventing only what's missing and building
-   * it around what they already wrote. This is the Story Bible's root: every
-   * later level (spine → characters → scenes → sections) is anchored to it, so
-   * getting one cohesive world/era/tone here is what stops downstream drift.
-   *
-   * Returns proposed values for ALL fields; the caller applies them only to the
-   * fields the user left empty/unlocked, preserving authored input and provenance.
+   * Refine a rough idea into a polished logline, propose a comic title, and
+   * develop the world it happens in (setting / era / tone) — all in one call,
+   * since they're one coherent decision, not three separate ones. Any
+   * setting/era/tone the writer already typed is kept as-is and everything
+   * else is built around it; the caller applies proposed world fields only to
+   * whichever the user left blank, preserving authored input.
    */
-  async developSetup(input: SetupInput, signal?: AbortSignal): Promise<DevelopedSetup> {
+  async shapeIdea(
+    rough: string,
+    existingWorld?: { setting?: string; era?: string; tone?: string },
+    signal?: AbortSignal,
+  ): Promise<ShapedIdea> {
     const system =
-      'You are a comic book story development editor. From the PREMISE and any details the writer already gave, ' +
-      'develop ONE coherent story foundation. Fill in every element that is missing so the whole thing reads as a ' +
-      'single world and a single story. HARD RULES: (1) keep everything the writer already wrote — never contradict ' +
-      'or replace a provided value; build the rest around it. (2) Make SETTING (the place/world), ERA (the time ' +
-      'period), and TONE (genre + mood) clearly belong together. (3) STORYLINE is the arc in 2–3 sentences — a ' +
-      'beginning, a turn, and where it heads — consistent with the premise. (4) CHARACTERS is a short roster: 2–5 ' +
-      'names each with a one-line role the premise needs. (5) TITLE is short and evocative (2–5 words, no subtitle, ' +
-      'no quotes). Be concrete and vivid but concise. Return ONLY a JSON object of the form ' +
-      '{"title":"","setting":"","era":"","tone":"","storyline":"","characters":""}.';
-    const provided = (label: string, v: string) =>
-      `${label}: ${v.trim() ? v.trim() : '— (missing — you invent it)'}`;
+      'You are a comic book story editor. From the user\'s rough idea, do three things, all part of ONE coherent ' +
+      'story: (1) rewrite it into a single vivid logline — 2–3 sentences covering the protagonist, what they want, ' +
+      'the central conflict, the stakes, and the tone; (2) propose a short, evocative comic book title (2 to 5 ' +
+      'words, no subtitle, no quotation marks); (3) propose the world it happens in — SETTING (the place/world), ' +
+      'ERA (the time period), and TONE (genre + mood) — all clearly belonging together and consistent with the ' +
+      'logline. If the writer already gave a setting/era/tone, keep it exactly as given and build the rest around ' +
+      'it — never contradict a provided value. Return ONLY a JSON object of the form ' +
+      '{"title":"","logline":"","setting":"","era":"","tone":""}.';
+    const provided = (label: string, v: string | undefined) =>
+      `${label}: ${v?.trim() ? v.trim() : '— (not given — you invent it)'}`;
     const user =
+      rough.trim() +
+      '\n\n' +
       [
-        provided('PREMISE', input.premise),
-        provided('CHARACTERS', input.characters),
-        provided('SETTING', input.setting),
-        provided('ERA', input.era),
-        provided('TONE', input.tone),
-        provided('STORYLINE', input.storyline),
-      ].join('\n') + '\n\nDevelop the complete, coherent foundation as JSON.';
+        provided('Existing setting', existingWorld?.setting),
+        provided('Existing era', existingWorld?.era),
+        provided('Existing tone', existingWorld?.tone),
+      ].join('\n');
     const raw = await this.ai.chat(
       [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      { temperature: 0.7, maxTokens: 1200, schema: DEVELOPED_SETUP_SCHEMA, signal },
-    );
-    const p = parseJsonObject(raw);
-    const str = (v: any) => String(v ?? '').trim();
-    // The model sometimes returns `characters` as a roster ARRAY (of objects or
-    // strings) rather than one string — flatten it to a readable "Name — role" list.
-    const roster = (v: any): string => {
-      if (!Array.isArray(v)) return str(v);
-      return v
-        .map((c) =>
-          typeof c === 'string'
-            ? c.trim()
-            : [str(c?.name), str(c?.role ?? c?.description)].filter(Boolean).join(' — '),
-        )
-        .filter(Boolean)
-        .join('; ');
-    };
-    return {
-      title: str(p?.title),
-      setting: str(p?.setting),
-      era: str(p?.era),
-      tone: str(p?.tone),
-      storyline: str(p?.storyline),
-      characters: roster(p?.characters),
-    };
-  }
-
-  // ── (legacy) Idea refinement — single logline + title ────────────────────────
-  /**
-   * Refine a rough idea into a polished logline AND propose a comic title. The
-   * idea is the starting point — the user shouldn't have to name the book first;
-   * a good title falls out of a clear premise.
-   */
-  async shapeIdea(rough: string, signal?: AbortSignal): Promise<ShapedIdea> {
-    const system =
-      'You are a comic book story editor. From the user\'s rough idea, do two things: ' +
-      '(1) rewrite it into a single vivid logline — 2–3 sentences covering the protagonist, what they want, ' +
-      'the central conflict, the stakes, and the tone; and ' +
-      '(2) propose a short, evocative comic book title (2 to 5 words, no subtitle, no quotation marks). ' +
-      'Return ONLY a JSON object of the form {"title":"","logline":""}.';
-    const raw = await this.ai.chat(
-      [
-        { role: 'system', content: system },
-        { role: 'user', content: rough.trim() },
-      ],
-      { temperature: 0.7, maxTokens: 800, schema: SHAPED_IDEA_SCHEMA, signal },
+      { temperature: 0.7, maxTokens: 1200, schema: SHAPED_IDEA_SCHEMA, signal },
     );
     const parsed = parseJsonObject(raw);
+    const str = (v: any) => String(v ?? '').trim();
     return {
-      title: String(parsed?.title ?? '').trim(),
-      logline: String(parsed?.logline ?? '').trim(),
+      title: str(parsed?.title),
+      logline: str(parsed?.logline),
+      setting: str(parsed?.setting),
+      era: str(parsed?.era),
+      tone: str(parsed?.tone),
     };
   }
 
@@ -628,11 +584,13 @@ export class ComicAssistant {
   async suggestPageCount(ctx: StoryContext, signal?: AbortSignal): Promise<number> {
     const system =
       'You are a comic book editor deciding the LENGTH of a comic. From the story below, decide how many interior ' +
-      'comic PAGES it needs to be told COMPLETELY and at a good pace — every important beat gets room to land, but ' +
-      'nothing is padded, stretched, or repeated. HEURISTIC: roughly ONE to TWO pages per distinct scene/beat the ' +
-      'story actually has. Count the real beats (use the STORY BEATS if given). A single-scene incident needs only ' +
-      '4–6 pages — do NOT inflate a simple story. A full short-story arc is ~10–18; only a genuinely large, ' +
-      'multi-turn epic approaches 30. Do not pick a big number just to be safe. The number MUST be EVEN. ' +
+      'comic PAGES it needs to be told COMPLETELY and at a TIGHT, fast pace — every important beat gets room to land, ' +
+      'but nothing is padded, stretched, or repeated. A tight comic that moves is ALWAYS better than a long one that ' +
+      'sags and gets boring; when in doubt, choose FEWER pages. HEURISTIC: roughly ONE page per distinct beat the ' +
+      'story actually has. Count the real beats (use the STORY BEATS if given). A single-scene incident is 4–6 pages; ' +
+      'a typical short story is 8–10 pages; only a genuinely large story with many locations and turns goes past 12, ' +
+      'and only a sprawling epic approaches 30. Do NOT default to a big number, and NEVER pad a simple story just to ' +
+      'feel "complete". The number MUST be EVEN. ' +
       `Reply with ONLY a JSON object {"pages": N} where N is an even integer between ${PAGE_COUNT_MIN} and ${PAGE_COUNT_MAX}.`;
     const raw = await this.ai.chat(
       [
@@ -655,10 +613,9 @@ export class ComicAssistant {
 
   // ── Step 4: Pages — batched "plan → expand", same as characters ──────────────
   /**
-   * Storyboard in two phases so a small model stays coherent over many pages:
-   *   1. plan — outline the arc as `count` one-line page beats.
-   *   2. expand — one focused call per page for its caption + dialogue.
-   * `onProgress` streams pages so the UI fills them in one at a time.
+   * Storyboard as a stream of pages. Thin wrapper over {@link generateScenes} —
+   * the SAME state-driven engine the Story Bible uses — so the eval/preview path
+   * gets identical continuity guarantees. `onProgress` streams pages one at a time.
    */
   async storyboardPages(
     ctx: StoryContext,
@@ -666,35 +623,22 @@ export class ComicAssistant {
     onProgress?: PageProgress,
     signal?: AbortSignal,
   ): Promise<SuggestedPage[]> {
-    const beats = await this.planStoryboard(ctx, count, signal);
-    const memory: StoryboardMemory = { layouts: [], lines: [], lastImage: '', prevSummary: '', introduced: [] };
-    const out: SuggestedPage[] = [];
-    for (let i = 0; i < beats.length; i++) {
-      // Each page sees the whole outline PLUS what earlier pages actually wrote:
-      // the layouts and spoken lines it must NOT repeat, and the previous page's
-      // summary + last image it must CONTINUE FROM — so pages connect, not just differ.
-      const page = await this.writePage(ctx, beats, i, memory, signal);
-      memory.layouts.push(page.layout);
-      for (const p of page.panels) if (p.dialogue) memory.lines.push(p.dialogue);
-      const last = page.panels[page.panels.length - 1];
-      if (last?.description) memory.lastImage = last.description;
-      memory.prevSummary = beats[i]?.summary ?? '';
-      out.push(page);
-      onProgress?.(i + 1, beats.length, page);
-    }
-    return out;
+    const { pages } = await this.generateScenes(ctx, count, onProgress, signal);
+    return pages;
   }
 
   /**
    * Compose the whole story as ONE {@link StoryBible} JSON — the single source of
-   * truth. It generates every level from the same tree so the story stays a
-   * single thread and the cast stays locked (no strangers appear):
-   *   world + locked cast (from ctx) → spine → scenes (each mapped to a beat,
-   *   carrying the present cast) → sections (panels) → art briefs.
+   * truth that DRIVES generation (not a record written after the fact). Every
+   * level is generated top-down from the same tree so the story stays one thread
+   * and the cast stays locked:
+   *   world + locked cast (from ctx) → spine → scenes (each with a real, chained
+   *   continuity state) → sections (panels) → art briefs.
    *
-   * Streams each finished scene as a page via `onProgress`, exactly like
-   * {@link storyboardPages}, so the wizard preview fills in live. The returned
-   * bible is persisted on the book and projected to the reader.
+   * The scene continuity state is computed BEFORE each scene's panels and feeds
+   * into both the script and the art briefs, so pages physically chain instead of
+   * teleporting. Streams each finished scene as a page via `onProgress` for the
+   * live preview; the returned bible is persisted and projected to the reader.
    */
   async composeStoryBible(
     ctx: StoryContext,
@@ -702,23 +646,129 @@ export class ComicAssistant {
     onProgress?: PageProgress,
     signal?: AbortSignal,
   ): Promise<StoryBible> {
-    // Dramatic architecture first, so it's captured in the bible (not discarded).
+    const { scenes, spine } = await this.generateScenes(ctx, count, onProgress, signal);
+    return assembleBible(ctx, spine, scenes);
+  }
+
+  /**
+   * The one state-driven generation engine both public entry points use. It makes
+   * the Story Bible the DRIVER of generation:
+   *   1. spine — the dramatic architecture (captured in the bible, not discarded).
+   *   2. beats — the scene outline, distributed from the author's beats.
+   *   3. per scene, IN CAUSAL ORDER:
+   *        a. {@link planSceneState} fixes the concrete continuity (where/when/who
+   *           + the causal link from the previous scene's exit) FIRST;
+   *        b. {@link writePage} scripts and draws the scene INSIDE that state, so
+   *           the panels can't drift out of the location or jump ahead of the
+   *           story;
+   *        c. the scene records its real entry/exit state, and the next scene
+   *           chains from this one's exit.
+   * Returns the projected pages (for the preview/eval) alongside the scenes and
+   * spine (for the bible) — one generation, two shapes of the same result.
+   */
+  private async generateScenes(
+    ctx: StoryContext,
+    count: number,
+    onProgress?: PageProgress,
+    signal?: AbortSignal,
+  ): Promise<{ pages: SuggestedPage[]; scenes: Scene[]; spine: StorySpine }> {
     const spine = await this.planStorySpine(ctx, signal);
-    // Then the scene outline (cast already canonicalised to the locked cast).
     const beats = await this.planStoryboard(ctx, count, signal);
     const memory: StoryboardMemory = { layouts: [], lines: [], lastImage: '', prevSummary: '', introduced: [] };
+    const pages: SuggestedPage[] = [];
     const scenes: Scene[] = [];
+    // The continuity chain: each scene's entry is derived from the previous
+    // scene's exit, so the world can never teleport between pages.
+    let prevExit = emptyState();
     for (let i = 0; i < beats.length; i++) {
-      const page = await this.writePage(ctx, beats, i, memory, signal);
+      const state = await this.planSceneState(ctx, beats, i, prevExit, signal);
+      const page = await this.writePage(ctx, beats, i, memory, state.entry, signal);
       memory.layouts.push(page.layout);
       for (const p of page.panels) if (p.dialogue) memory.lines.push(p.dialogue);
       const last = page.panels[page.panels.length - 1];
       if (last?.description) memory.lastImage = last.description;
       memory.prevSummary = beats[i]?.summary ?? '';
-      scenes.push(beatToScene(beats[i], page));
+      pages.push(page);
+      scenes.push(beatToScene(beats[i], page, state));
+      prevExit = state.exit;
       onProgress?.(i + 1, beats.length, page);
     }
-    return assembleBible(ctx, spine, scenes);
+    return { pages, scenes, spine };
+  }
+
+  /**
+   * The continuity pass for ONE scene — the fix for the story teleporting between
+   * pages. Runs BEFORE the scene's panels are written. Given the previous scene's
+   * exit state and this scene's beat, it fixes the concrete, physical world-state:
+   * the single location, the time, exactly who is on stage, and — critically — the
+   * CAUSAL link that brings the characters here from where the last scene left
+   * them. That state then constrains both the script and every art brief, so a
+   * scene cannot open somewhere with no path from the one before it.
+   */
+  private async planSceneState(
+    ctx: StoryContext,
+    beats: PageBeat[],
+    pageIdx: number,
+    prevExit: ContinuityState,
+    signal?: AbortSignal,
+  ): Promise<{ entry: ContinuityState; exit: ContinuityState }> {
+    const summary = beats[pageIdx]?.summary ?? '';
+    const assigned = beats[pageIdx]?.characters ?? [];
+    const castNames = ctx.characters.map((c) => (c.name ?? '').trim()).filter(Boolean);
+    const isFirst = pageIdx === 0;
+    const prevBlock = isFirst
+      ? 'This is the FIRST scene of the story — establish the opening location, time, and who is present.'
+      : 'THE PREVIOUS SCENE ENDED HERE (this scene must chain directly from it):\n' +
+        `- Location: ${prevExit.location || '(unspecified)'}\n` +
+        `- Time: ${prevExit.time || '(unspecified)'}\n` +
+        `- On stage: ${prevExit.present.join(', ') || '(nobody named)'}\n` +
+        `- What it set in motion: ${prevExit.knowledge || '(nothing noted)'}`;
+    const system =
+      'You are the CONTINUITY SUPERVISOR for a comic. Your ONLY job is to keep the world physically consistent from ' +
+      'scene to scene so the finished comic reads as one continuous story and never teleports. For THIS scene, given ' +
+      'where the previous scene ended and this scene\'s beat, determine its CONCRETE, PHYSICAL continuity:\n' +
+      '- location: the single place this scene happens. ONE place only — a scene never spans two locations.\n' +
+      '- time: when it happens, relative to the last scene (e.g. "moments later", "that night", "the next morning").\n' +
+      '- present: the EXACT cast names physically on stage in this scene (choose only from the cast).\n' +
+      '- continuesFrom: ONE sentence naming the CAUSAL link from the previous scene — the thing the characters just ' +
+      'did or decided that physically brings them to THIS location. If the previous scene had them deciding to seek ' +
+      'shelter, this scene must show them travelling to or arriving at that shelter — NEVER already in an unrelated ' +
+      'place with no path from the last scene. For the first scene, describe the starting situation instead.\n' +
+      '- mood: the emotional temperature of the scene, in a few words.\n' +
+      '- reveals: ONE sentence on what CHANGES or what the reader now knows by the end of this scene — the thread the ' +
+      'NEXT scene will pick up.\n' +
+      'HARD RULE: the location, the time, and who is present must all follow logically from the previous scene. A ' +
+      'character may be present here only if they were present before or their arrival is explained by continuesFrom. ' +
+      'Nothing and no one may appear from nowhere. Return ONLY JSON matching the schema.';
+    const user =
+      this.contextBlock(ctx) +
+      (castNames.length ? `\n\nCAST: ${castNames.join(', ')}` : '') +
+      `\n\n${prevBlock}` +
+      `\n\nTHIS SCENE'S BEAT (page ${pageIdx + 1} of ${beats.length}): ${summary}` +
+      (assigned.length ? `\nCHARACTERS THE STORY ASSIGNS TO THIS SCENE: ${assigned.join(', ')}` : '') +
+      '\n\nDetermine this scene\'s continuity as JSON.';
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.4, maxTokens: 700, schema: SCENE_STATE_SCHEMA, signal },
+    );
+    const p = parseJsonObject(raw);
+    const str = (v: any) => String(v ?? '').trim();
+    const named = Array.isArray(p?.present) ? canonicalCast(p.present.map((n: any) => str(n)), castNames) : [];
+    // Fall back to the cast the outline assigned this page if the model named no
+    // valid stage — the scene is never left with an empty cast.
+    const present = named.length ? named : canonicalCast(assigned, castNames);
+    const location = str(p?.location);
+    const time = str(p?.time);
+    const mood = str(p?.mood);
+    // One scene = one place, so entry and exit share location/time/cast; the
+    // difference the NEXT scene needs is the thread: entry carries how we got
+    // here, exit carries what this scene set in motion.
+    const entry: ContinuityState = { location, time, present, props: {}, mood, knowledge: str(p?.continuesFrom) };
+    const exit: ContinuityState = { location, time, present, props: {}, mood, knowledge: str(p?.reveals) || str(p?.continuesFrom) };
+    return { entry, exit };
   }
 
   /**
@@ -832,6 +882,7 @@ export class ComicAssistant {
     beats: PageBeat[],
     pageIdx: number,
     memory: StoryboardMemory,
+    entry: ContinuityState,
     signal?: AbortSignal,
   ): Promise<SuggestedPage> {
     const summary = beats[pageIdx]?.summary ?? '';
@@ -848,7 +899,7 @@ export class ComicAssistant {
     const newcomers = pageCastNames.filter(
       (n) => !memory.introduced.some((s) => s.toLowerCase() === n.toLowerCase()),
     );
-    const plan = await this.planPage(ctx, beats, pageIdx, memory, newcomers, signal);
+    const plan = await this.planPage(ctx, beats, pageIdx, memory, newcomers, entry, signal);
     // Mark them met, so later pages don't re-introduce them.
     for (const n of newcomers) memory.introduced.push(n);
     const want = panelCountFor(plan.layout);
@@ -857,7 +908,7 @@ export class ComicAssistant {
     let prevImage = memory.lastImage;
     for (let j = 0; j < want; j++) {
       const slot = plan.panels[j] ?? { beat: summary, dialogue: '', dialogueKind: 'speech' as BubbleKind, narration: '', speaker: '' };
-      const description = (await this.describePanel(ctx, summary, slot, j, want, prevImage, pageCast, signal)) || slot.beat || summary;
+      const description = (await this.describePanel(ctx, summary, slot, j, want, prevImage, pageCast, entry, signal)) || slot.beat || summary;
       prevImage = description;
       panels.push({
         description,
@@ -882,6 +933,7 @@ export class ComicAssistant {
     pageIdx: number,
     memory: StoryboardMemory,
     newcomers: string[],
+    entry: ContinuityState,
     signal?: AbortSignal,
   ): Promise<{ layout: LayoutId; panels: PanelPlanSlot[] }> {
     const total = beats.length;
@@ -915,6 +967,13 @@ export class ComicAssistant {
       'place/time and MUST be motivated by what just happened (a jump with no cause is forbidden). Add a short ' +
       'narration caption on a later panel too ONLY when the picture and dialogue cannot convey something essential ' +
       '(a passage of time, an unseen consequence, an inner realisation). Otherwise leave "narration" as "".\n' +
+      'OPENING / ESTABLISHING SHOT: a page that opens on a NEW place must BEGIN with an ESTABLISHING SHOT — panel 1 ' +
+      'is a WIDE or high/aerial view of the location ITSELF (the landscape, the exterior, the skyline, the room) at ' +
+      'its time of day, so the reader feels WHERE and WHEN we are before anyone speaks, exactly like a film\'s opening ' +
+      'shot. That first panel carries only the scene\'s narration caption and NO dialogue (leave "speaker" and ' +
+      '"dialogue" ""), and its "beat" names NO character — it is the empty place. This is ALWAYS required for page 1 ' +
+      '(the whole book\'s opening) and for any page that moves to a new location. NEVER open such a page on a tight ' +
+      'close-up of characters already mid-conversation — earn the dialogue by showing the world first.\n' +
       'FIRST choose the panel layout that fits this moment:\n' +
       '- splash = one big dramatic full-page panel (a reveal, a huge emotional beat)\n' +
       '- strip3 = 3 stacked panels (steady beats, a short exchange)\n' +
@@ -947,9 +1006,22 @@ export class ComicAssistant {
       '"narration", not here.) Use "speech" when dialogue is "".\n' +
       'The number of panels MUST match the layout (splash=1, strip3=3, grid4=4, feature3=3, six=6). ' +
       'Return ONLY {"layout":"","panels":[{"beat":"","narration":"","speaker":"","dialogue":"","dialogueKind":"speech"}]}.';
+    // The concrete, pre-computed continuity for THIS scene — the authority the
+    // whole page obeys. It replaces guesswork about where/when/who with fixed
+    // facts, so the script cannot wander out of the scene or jump ahead of it.
+    const stateBlock =
+      '\n\nSCENE CONTINUITY (fixed for this page — obey it exactly; do NOT relocate or re-time any panel):\n' +
+      `- LOCATION (every panel is set HERE): ${entry.location || summary}\n` +
+      (entry.time ? `- TIME: ${entry.time}\n` : '') +
+      (entry.present.length ? `- ON STAGE (only these characters are physically here): ${entry.present.join(', ')}\n` : '') +
+      (entry.knowledge
+        ? `- HOW WE ARRIVED HERE (this page is the direct consequence of this — carry it forward, do not restart elsewhere): ${entry.knowledge}\n`
+        : '') +
+      'Panel 1\'s narration caption should establish this location and time. Every panel stays in this one place.';
     const user =
       this.contextBlock(ctx) +
       `\n\nFULL STORY OUTLINE (all ${total} pages, in order):\n${outline}` +
+      stateBlock +
       (memory.layouts.length
         ? `\n\nLAYOUTS ALREADY USED (pages 1–${memory.layouts.length}, in order): ${memory.layouts.join(', ')}`
         : '') +
@@ -982,6 +1054,13 @@ export class ComicAssistant {
               return `- ${n}${c?.traits?.trim() ? ` — ${c.traits.trim()}` : ''}`;
             })
             .join('\n')}`
+        : '') +
+      (index === 1
+        ? '\n\nTHIS IS PAGE 1 — THE OPENING OF THE WHOLE COMIC. Do NOT start on characters talking. Panel 1 MUST be a ' +
+          'wide establishing shot of the setting (the place itself at its time of day — a vista, an exterior, an ' +
+          'aerial view), with a narration caption and no dialogue, like a film\'s opening shot. Then use the later ' +
+          'panels to introduce the protagonist inside that world. Prefer a multi-panel layout (not a single splash) ' +
+          'so there is room for both the establishing shot and the introduction.'
         : '') +
       `\n\nWrite ONLY page ${index} of ${total} — its beat: ${summary}\nScript this page as JSON.`;
     const raw = await this.ai.chat(
@@ -1021,11 +1100,14 @@ export class ComicAssistant {
       .filter((p: PanelPlanSlot) => p.beat.length > 0 || p.dialogue.length > 0 || p.narration.length > 0);
     // Backstop the coverage guarantee: any character this page must feature but
     // that the model failed to name gets written into a panel beat, so the art
-    // brief renders them (charactersNamedIn keys off the beat text).
-    if (panels.length) {
+    // brief renders them (charactersNamedIn keys off the beat text). On page 1 the
+    // opening establishing panel (index 0) is meant to be the empty place — never
+    // inject a character into it, so the establishing shot stays peopleless.
+    const coverable = index === 1 && panels.length > 1 ? panels.slice(1) : panels;
+    if (coverable.length) {
       for (const name of pageCharacters) {
         if (panels.some((p) => nameInText(`${p.beat} ${p.dialogue}`, name))) continue;
-        const target = panels.reduce((a, b) => (a.beat.length <= b.beat.length ? a : b));
+        const target = coverable.reduce((a, b) => (a.beat.length <= b.beat.length ? a : b));
         target.beat = `${target.beat} ${name} is present in the frame.`.trim();
       }
     }
@@ -1046,6 +1128,7 @@ export class ComicAssistant {
     total: number,
     prevImage: string,
     pageCast: StoryContext['characters'],
+    entry: ContinuityState,
     signal?: AbortSignal,
   ): Promise<string> {
     const system =
@@ -1077,8 +1160,16 @@ export class ComicAssistant {
     // The shared world — pinned into every panel so the setting/era doesn't drift
     // from frame to frame (the "ruins → marble palace" failure).
     const world = [ctx.setting?.trim(), ctx.era?.trim()].filter(Boolean).join(' · ');
+    // This scene's FIXED location — the hard anchor that stops the art brief from
+    // inventing a different place than the dialogue is set in (the "campfire on a
+    // bridge" failure). Every panel of the page shares it.
+    const place = entry.location?.trim();
+    const when = entry.time?.trim();
     const user =
       (world ? `WORLD (every panel is set in this exact world — keep it consistent): ${world}\n\n` : '') +
+      (place
+        ? `LOCATION (this panel is physically HERE — draw THIS place and no other; do not invent a different setting): ${place}${when ? ` — ${when}` : ''}\n\n`
+        : '') +
       (cast ? `CHARACTERS (keep each looking exactly like this):\n${cast}\n\n` : '') +
       `SCENE (this page): ${pageSummary}\n` +
       `THIS PANEL (${index + 1} of ${total}) SHOWS: ${slot.beat || pageSummary}\n` +
@@ -1297,10 +1388,17 @@ function emptyState(): ContinuityState {
   return { location: '', time: '', present: [], props: {}, mood: '', knowledge: '' };
 }
 
-/** One generated page (beat + panels) → a Bible scene with sections. */
-function beatToScene(beat: PageBeat, page: SuggestedPage): Scene {
-  const entry = emptyState();
-  entry.present = [...(beat?.characters ?? [])];
+/**
+ * One generated page (beat + panels + its computed continuity) → a Bible scene.
+ * The entry/exit states are the REAL chained states the scene was generated
+ * under — not empty stubs — so the bible records the actual continuity that
+ * drove the art, and a later regeneration can chain from it.
+ */
+function beatToScene(
+  beat: PageBeat,
+  page: SuggestedPage,
+  state: { entry: ContinuityState; exit: ContinuityState },
+): Scene {
   const sections: Section[] = page.panels.map((panel) => ({
     id: newId('section'),
     moment: aiField(panel.description ?? ''),
@@ -1315,9 +1413,9 @@ function beatToScene(beat: PageBeat, page: SuggestedPage): Scene {
     id: newId('scene'),
     goal: aiField(beat?.summary ?? ''),
     conflict: aiField(''),
-    turn: aiField(''),
-    entryState: aiField(entry),
-    exitState: aiField(emptyState()),
+    turn: aiField(state.exit.knowledge ?? ''),
+    entryState: aiField(state.entry),
+    exitState: aiField(state.exit),
     layout: page.layout,
     sections,
   };

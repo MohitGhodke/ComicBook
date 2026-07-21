@@ -102,7 +102,6 @@ export class Creator implements OnInit {
   // Per-step AI state
   readonly ideaLoading = signal(false);
   readonly ideaSuggestion = signal<ShapedIdea | null>(null);
-  readonly worldLoading = signal(false);
 
   readonly charLoading = signal(false);
   readonly charSuggestions = signal<SuggestedCharacter[] | null>(null);
@@ -231,11 +230,18 @@ export class Creator implements OnInit {
     this.aiAbort?.abort();
   }
 
-  // Step 1 — Idea (entry point; AI refines the idea and suggests a title)
+  // Step 1 — Idea (entry point; AI refines the idea, names it, and develops
+  // the world it happens in — all one coherent decision, so one button).
   async shapeIdea() {
     if (!this.draft.idea.trim()) return;
     this.ideaSuggestion.set(null);
-    const shaped = await this.run(this.ideaLoading, (s) => this.assistant.shapeIdea(this.draft.idea, s));
+    const shaped = await this.run(this.ideaLoading, (s) =>
+      this.assistant.shapeIdea(
+        this.draft.idea,
+        { setting: this.draft.setting, era: this.draft.era, tone: this.draft.tone },
+        s,
+      ),
+    );
     if (shaped !== null) this.ideaSuggestion.set(shaped);
   }
   acceptIdea() {
@@ -243,40 +249,15 @@ export class Creator implements OnInit {
     if (s) {
       if (s.logline) this.draft.idea = s.logline;
       if (s.title) this.draft.title = s.title;
+      // World fields only fill in if the author left them blank — never overwrite what they wrote.
+      if (!this.draft.setting.trim() && s.setting) this.draft.setting = s.setting;
+      if (!this.draft.era.trim() && s.era) this.draft.era = s.era;
+      if (!this.draft.tone.trim() && s.tone) this.draft.tone = s.tone;
       this.persist();
     }
     this.ideaSuggestion.set(null);
   }
   dismissIdea() { this.ideaSuggestion.set(null); }
-
-  /**
-   * Fill any BLANK world fields (setting / era / tone), and the title if empty,
-   * from the idea — leaving whatever the user already wrote untouched. The world
-   * then flows into every later step (characters, scenes, pages, art) so the
-   * story and its art stay coherent.
-   */
-  async suggestWorld() {
-    if (!this.draft.idea.trim()) return;
-    const dev = await this.run(this.worldLoading, (s) =>
-      this.assistant.developSetup(
-        {
-          premise: this.draft.idea,
-          characters: '',
-          setting: this.draft.setting,
-          era: this.draft.era,
-          tone: this.draft.tone,
-          storyline: '',
-        },
-        s,
-      ),
-    );
-    if (!dev) return;
-    if (!this.draft.setting.trim() && dev.setting) this.draft.setting = dev.setting;
-    if (!this.draft.era.trim() && dev.era) this.draft.era = dev.era;
-    if (!this.draft.tone.trim() && dev.tone) this.draft.tone = dev.tone;
-    if (!this.draft.title.trim() && dev.title) this.draft.title = dev.title;
-    this.persist();
-  }
 
   // Step 2 — Characters
   async suggestCharacters() {

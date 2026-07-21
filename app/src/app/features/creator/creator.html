@@ -55,7 +55,7 @@
             </div>
             <textarea class="textarea tall" [(ngModel)]="draft.idea" (ngModelChange)="persist()"
                       placeholder="Describe your idea in your own words — what happens, who it's about, what it's really about. The title can come later."></textarea>
-            <span class="hint faint">Just get the idea down. “✨ Refine &amp; name it” will polish it and propose a title.</span>
+            <span class="hint faint">Just get the idea down. “✨ Refine &amp; name it” will polish it, propose a title, and sketch the world below.</span>
 
             @if (ideaLoading()) {
               <div class="ai-card ai-thinking">
@@ -74,8 +74,16 @@
                 @if (sug.logline) {
                   <p class="ai-text">{{ sug.logline }}</p>
                 }
+                @if (sug.setting || sug.era || sug.tone) {
+                  <p class="ai-text">
+                    <span class="faint">World:</span>
+                    @if (sug.setting) { {{ sug.setting }} }
+                    @if (sug.era) { <span class="faint"> · </span>{{ sug.era }} }
+                    @if (sug.tone) { <span class="faint"> · </span>{{ sug.tone }} }
+                  </p>
+                }
                 <div class="ai-actions">
-                  <button class="btn btn--primary small" (click)="acceptIdea()">Use idea &amp; title</button>
+                  <button class="btn btn--primary small" (click)="acceptIdea()">Use idea, title &amp; world</button>
                   <button class="btn btn--ghost small" (click)="shapeIdea()">Try again</button>
                   <button class="btn btn--ghost small" (click)="dismissIdea()">Dismiss</button>
                 </div>
@@ -91,22 +99,7 @@
 
           <!-- The world — feeds every later step so the story and art stay coherent. -->
           <div class="field">
-            <div class="field-label-row">
-              <span class="field-label">The world <span class="faint">(optional — sets place, time &amp; mood for the whole book)</span></span>
-              <div class="ai-controls">
-                @if (aiAvailable()) {
-                  @if (worldLoading()) {
-                    <button class="btn small ai-btn" (click)="cancelAi()">Cancel</button>
-                  } @else {
-                    <button class="btn small ai-btn" (click)="suggestWorld()" [disabled]="!draft.idea.trim()"
-                            title="Fill any blank world fields from your idea">✨ Suggest the world</button>
-                  }
-                }
-              </div>
-            </div>
-            @if (worldLoading()) {
-              <div class="ai-card ai-thinking"><span class="ai-spinner"></span> Imagining the world…</div>
-            }
+            <span class="field-label">The world <span class="faint">(optional — sets place, time &amp; mood for the whole book)</span></span>
             <div class="world-grid">
               <label class="field">
                 <span class="field-label">Setting <span class="faint">— where</span></span>
@@ -124,7 +117,7 @@
                        placeholder="The feel, e.g. “bleak, hopeful survival drama.”" />
               </label>
             </div>
-            <span class="hint faint">Leave any blank and “✨ Suggest the world” will fill it from your idea. You can edit anything.</span>
+            <span class="hint faint">Leave any blank and “✨ Refine &amp; name it” above will fill it in. You can edit anything.</span>
           </div>
 
           <label class="field">
