@@ -10,6 +10,12 @@ import { DEFAULT_STYLE_ID } from '../style/art-styles';
 export interface Draft {
   title: string;
   idea: string;
+  /**
+   * The AI-refined premise / logline. Kept SEPARATE from `idea` so the author's
+   * own words are never overwritten by the refinement — `idea` stays as typed,
+   * `premise` holds the polished version that drives generation.
+   */
+  premise: string;
   /** The story's world / place (optional — feeds every generation for coherence). */
   setting: string;
   /** The time period / era. */
@@ -38,7 +44,7 @@ export function newStyleSeed(): number {
 
 export function emptyDraft(): Draft {
   return {
-    title: '', idea: '', setting: '', era: '', tone: '', author: '', characters: [], synopsis: '', pages: [],
+    title: '', idea: '', premise: '', setting: '', era: '', tone: '', author: '', characters: [], synopsis: '', pages: [],
     styleSeed: newStyleSeed(), styleId: DEFAULT_STYLE_ID, bubbleFontSize: 'large',
   };
 }

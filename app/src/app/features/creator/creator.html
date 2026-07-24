@@ -72,7 +72,7 @@
                   <p class="ai-suggest-title">Title: <strong>{{ sug.title }}</strong></p>
                 }
                 @if (sug.logline) {
-                  <p class="ai-text">{{ sug.logline }}</p>
+                  <p class="ai-text"><span class="faint">Premise:</span> {{ sug.logline }}</p>
                 }
                 @if (sug.setting || sug.era || sug.tone) {
                   <p class="ai-text">
@@ -83,13 +83,20 @@
                   </p>
                 }
                 <div class="ai-actions">
-                  <button class="btn btn--primary small" (click)="acceptIdea()">Use idea, title &amp; world</button>
+                  <button class="btn btn--primary small" (click)="acceptIdea()">Use premise, title &amp; world</button>
                   <button class="btn btn--ghost small" (click)="shapeIdea()">Try again</button>
                   <button class="btn btn--ghost small" (click)="dismissIdea()">Dismiss</button>
                 </div>
               </div>
             }
           </div>
+
+          <!-- The refined premise — kept separate so the raw idea above is never overwritten. -->
+          <label class="field">
+            <span class="field-label">Premise <span class="faint">— the refined logline (✨ fills this; your idea above stays untouched)</span></span>
+            <textarea class="textarea" [(ngModel)]="draft.premise" (ngModelChange)="persist()"
+                      placeholder="A polished 2–3 sentence logline — the protagonist, what they want, the conflict and stakes. Refine your idea above to fill this, or write your own."></textarea>
+          </label>
 
           <label class="field">
             <span class="field-label">Comic title <span class="faint">(optional — AI can name it for you)</span></span>
@@ -297,6 +304,13 @@
                 @if (!draft.idea.trim()) { <span class="faint hint">Write your big idea first.</span> }
               }
             } @else { <span class="ai-off faint">● AI offline</span> }
+            @if (hasFullStory()) {
+              <span class="page-nav-spacer"></span>
+              <button class="btn small btn--ghost" (click)="openStory()"
+                      title="Read the generated story as prose">📖 Read the full story</button>
+              <button class="btn small btn--ghost" (click)="exportBible()"
+                      title="Download the Story Bible JSON — the full premise → scene → panel → art-prompt tree the comic is generated from">⬇︎ Export Bible JSON</button>
+            }
           </div>
 
           @if (aiError()) { <div class="ai-card ai-error">{{ aiError() }}</div> }
@@ -339,8 +353,16 @@
 
           @if (draft.pages.length === 0) {
             <div class="pages-empty">
-              <p class="faint">No pages yet. Add your first page, or use ✨ Storyboard above.</p>
-              <button class="btn btn--primary" (click)="addPage()">+ Add your first page</button>
+              @if (hasFullStory()) {
+                <p class="faint">No pages yet — but your story is saved. Rebuild every page from it, or start fresh.</p>
+                <div class="pages-empty-actions">
+                  <button class="btn btn--primary" (click)="addPagesFromStory()">Rebuild pages from your story</button>
+                  <button class="btn" (click)="addPage()">+ Add a blank page</button>
+                </div>
+              } @else {
+                <p class="faint">No pages yet. Add your first page, or use ✨ Storyboard above.</p>
+                <button class="btn btn--primary" (click)="addPage()">+ Add your first page</button>
+              }
             </div>
           } @else {
             <!-- Page navigator: one page at a time -->
@@ -529,5 +551,31 @@
   <div class="preview-overlay">
     <button class="back-fab btn" (click)="closePreview()">← Back to editor</button>
     <app-reader [pages]="previewPages()" [bookFontSize]="draft.bubbleFontSize" />
+  </div>
+}
+
+<!-- Persistent AI loader — never goes away while an on-device task runs, and
+     stays visible above overlays so you can read the story while it keeps working. -->
+@if (aiBusy()) {
+  <div class="ai-floating-loader">
+    <app-book-loader [label]="aiBusyLabel()" [compact]="true" />
+  </div>
+}
+
+<!-- "Read the full story" — the polished prose reading of the generated story -->
+@if (storyOpen()) {
+  <div class="story-overlay" (click)="closeStory()">
+    <button class="back-fab btn" (click)="closeStory()">← Back to editor</button>
+    <article class="story-read" (click)="$event.stopPropagation()">
+      <span class="story-read-eyebrow">The story</span>
+      <h1 class="story-read-title">{{ draft.title.trim() || 'Untitled' }}</h1>
+      @if (draft.premise.trim()) { <p class="story-read-premise">{{ draft.premise }}</p> }
+      @for (s of fullStory(); track $index) {
+        <section class="story-scene">
+          <span class="story-scene-label">{{ s.label }}</span>
+          <p class="story-scene-prose">{{ s.prose }}</p>
+        </section>
+      }
+    </article>
   </div>
 }

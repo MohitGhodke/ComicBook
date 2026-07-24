@@ -15,6 +15,8 @@ import { timestamp } from '../../util/time';
 /** The story so far — passed into every helper so each step builds on the last. */
 export interface StoryContext {
   idea: string;
+  /** The AI-refined logline. When present it DRIVES generation; `idea` stays as the raw seed. */
+  premise?: string;
   characters: { name: string; appearance?: string; traits?: string }[];
   synopsis?: string;
   /** The story's world / place — kept in every prompt so nothing drifts out of it. */
@@ -51,12 +53,20 @@ export interface SuggestedPanel {
   narration: string;
   /** Who speaks the dialogue line (cast name). */
   speaker: string;
+  /** The staging direction (shot/framing/juxtaposition) that drove the art brief. */
+  staging?: string;
 }
 
 export interface SuggestedPage {
   /** The panel layout the AI chose for this page's moment. */
   layout: LayoutId;
   panels: SuggestedPanel[];
+  /**
+   * This page's scene written as narrative PROSE — the readable "good story" that
+   * the dialogue and art briefs were derived from. Streamed alongside the page so
+   * the "Read the full story" reading is available before the pages are even saved.
+   */
+  prose?: string;
 }
 
 export interface ShapedIdea {
@@ -188,28 +198,68 @@ const STORYBOARD_PLAN_SCHEMA = {
   },
 };
 
-const PAGE_PLAN_SCHEMA = {
-  name: 'page_plan',
+/**
+ * The VISUAL DIRECTION pass — the "adapt prose into a comic" step. AFTER the prose
+ * and BEFORE any words, this decides how to TELL THE SCENE IN PICTURES: the shot
+ * list. For each panel it fixes the frozen MOMENT, the one story point the image
+ * must CONVEY on its own, and the STAGING (shot + framing + what shares the frame)
+ * that makes the picture carry that meaning. The letterer and the art briefs then
+ * SERVE this — so the images do the storytelling instead of illustrating captions.
+ */
+const STAGE_SCENE_SCHEMA = {
+  name: 'scene_staging',
   schema: {
     type: 'object',
     properties: {
-      layout: { type: 'string', enum: ['splash', 'strip3', 'grid4', 'feature3', 'six'] },
+      // 'six' is intentionally omitted: six tiny panels leave no room for the art
+      // once captions and dialogue are lettered on. Max 4 panels per page.
+      layout: { type: 'string', enum: ['splash', 'strip3', 'grid4', 'feature3'] },
+      // The one physical SET the whole page shares — the fixed geography (key
+      // features and where characters stand) that every panel is drawn inside, so
+      // the images read as one continuous space instead of a new room each frame.
+      stage: { type: 'string' },
       panels: {
         type: 'array',
         items: {
           type: 'object',
           properties: {
-            beat: { type: 'string' },
+            moment: { type: 'string' },
+            conveys: { type: 'string' },
+            staging: { type: 'string' },
+          },
+          required: ['moment', 'conveys', 'staging'],
+        },
+      },
+    },
+    required: ['layout', 'stage', 'panels'],
+  },
+};
+
+/**
+ * The LETTERING pass — words for an already-staged page. Given each panel's staged
+ * moment (what it shows / must convey), it adds ONLY the text the page needs:
+ * gap-filler captions and real dialogue. It never re-decides the visuals.
+ */
+const PAGE_PLAN_SCHEMA = {
+  name: 'page_lettering',
+  schema: {
+    type: 'object',
+    properties: {
+      panels: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
             narration: { type: 'string' },
             speaker: { type: 'string' },
             dialogue: { type: 'string' },
             dialogueKind: { type: 'string', enum: ['speech', 'thought', 'narration'] },
           },
-          required: ['beat', 'narration', 'speaker', 'dialogue', 'dialogueKind'],
+          required: ['narration', 'speaker', 'dialogue', 'dialogueKind'],
         },
       },
     },
-    required: ['layout', 'panels'],
+    required: ['panels'],
   },
 };
 
@@ -237,12 +287,21 @@ const SCENE_STATE_SCHEMA = {
   },
 };
 
-/** One planned panel slot: the action beat plus its line, before the art brief. */
-interface PanelPlanSlot {
-  beat: string;
+/** One staged visual beat: how a panel TELLS the story in a picture, before words. */
+interface StagedPanel {
+  /** The frozen instant this frame captures. */
+  moment: string;
+  /** The one story point the reader must GRASP from this image alone. */
+  conveys: string;
+  /** Shot + framing + in-frame juxtaposition that makes the picture carry it. */
+  staging: string;
+}
+
+/** A staged panel joined with its lettering — the full plan handed to the art brief. */
+interface PanelPlanSlot extends StagedPanel {
   dialogue: string;
   dialogueKind: BubbleKind;
-  /** Narration caption for the panel (scene premise / bridge / context). */
+  /** Narration caption for the panel (a gap-filler; the image carries the story). */
   narration: string;
   /** Who speaks the dialogue line (cast name). */
   speaker: string;
@@ -680,20 +739,117 @@ export class ComicAssistant {
     // The continuity chain: each scene's entry is derived from the previous
     // scene's exit, so the world can never teleport between pages.
     let prevExit = emptyState();
+    // The prose chain: each scene's prose continues from the last one's, so the
+    // "good story" layer reads as one connected narrative, not disjoint beats.
+    let prevProse = '';
+    // EVERY per-scene call is individually resilient. A local runtime hiccup
+    // (e.g. LM Studio's intermittent gpt-oss "Channel Error") on any one call
+    // must NOT abort the whole book — the scene degrades to a sensible fallback
+    // and generation keeps going in the background. Only a real cancel stops it.
+    const rethrowIfAbort = (e: any) => {
+      if (e?.name === 'AbortError' || signal?.aborted) throw e;
+    };
     for (let i = 0; i < beats.length; i++) {
-      const state = await this.planSceneState(ctx, beats, i, prevExit, signal);
-      const page = await this.writePage(ctx, beats, i, memory, state.entry, signal);
+      // 1. Continuity — fall back to carrying the previous scene's state forward.
+      let state: { entry: ContinuityState; exit: ContinuityState };
+      try {
+        state = await this.planSceneState(ctx, beats, i, prevExit, signal);
+      } catch (e) {
+        rethrowIfAbort(e);
+        state = { entry: prevExit, exit: prevExit };
+      }
+      // 2. Prose — the quality anchor the dialogue and art briefs derive from.
+      //    On failure, degrade to summary-driven generation (empty prose).
+      let prose = '';
+      try {
+        prose = await this.writeSceneProse(ctx, beats, i, state.entry, prevProse, signal);
+      } catch (e) {
+        rethrowIfAbort(e);
+        prose = '';
+      }
+      // 3. The page script itself — on failure, emit a minimal one-panel page
+      //    from the beat/prose so the book still completes and stays editable.
+      let page: SuggestedPage;
+      try {
+        page = await this.writePage(ctx, beats, i, memory, state.entry, prose, signal);
+      } catch (e) {
+        rethrowIfAbort(e);
+        page = fallbackPage(beats[i], prose);
+      }
+      page.prose = prose;
       memory.layouts.push(page.layout);
       for (const p of page.panels) if (p.dialogue) memory.lines.push(p.dialogue);
       const last = page.panels[page.panels.length - 1];
       if (last?.description) memory.lastImage = last.description;
       memory.prevSummary = beats[i]?.summary ?? '';
       pages.push(page);
-      scenes.push(beatToScene(beats[i], page, state));
+      scenes.push(beatToScene(beats[i], page, state, prose));
       prevExit = state.exit;
+      prevProse = prose;
       onProgress?.(i + 1, beats.length, page);
     }
     return { pages, scenes, spine };
+  }
+
+  /**
+   * The PROSE pass for ONE scene — the quality anchor. BEFORE any panel is
+   * scripted or drawn, write the scene as vivid narrative prose the way a
+   * novelist would: the concrete action, what the characters do and notice, and
+   * the emotional turn it delivers. It is grounded in the pre-computed continuity
+   * state (so it can't wander out of the location/time) and chained from the
+   * previous scene's prose (so the book reads as one story). Both the dialogue
+   * script ({@link planPage}) and the art briefs ({@link describePanel}) are then
+   * DERIVED from this — the root fix for generic dialogue and wonky scene
+   * descriptions, since they now inherit the specificity of real prose.
+   */
+  private async writeSceneProse(
+    ctx: StoryContext,
+    beats: PageBeat[],
+    pageIdx: number,
+    entry: ContinuityState,
+    prevProse: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const summary = beats[pageIdx]?.summary ?? '';
+    const total = beats.length;
+    const isFirst = pageIdx === 0;
+    const isLast = pageIdx === total - 1;
+    const job = isFirst
+      ? 'OPEN the story: establish the place, the mood, and the character(s) in their normal world before anything turns.'
+      : isLast
+        ? 'CLOSE the story: deliver the final turn and show what has CHANGED since the beginning.'
+        : 'ADVANCE the story: this scene is the direct consequence of the one before it and pushes toward the climax.';
+    const system =
+      'You are an acclaimed graphic-novel writer drafting ONE scene of a comic as NARRATIVE PROSE — the polished ' +
+      'story a reader would love, not a list of shots. Write 3 to 5 sentences of vivid, specific prose in the ' +
+      'PRESENT TENSE that tell what happens in THIS scene: the concrete action, what the characters do and notice, ' +
+      'and the emotional turn the scene delivers. Ground every sentence in the fixed continuity you are given — do ' +
+      'NOT relocate the scene, change its time, or add characters who are not on stage. Write with restraint and ' +
+      'specificity: concrete sensory detail and real stakes, NO purple filler, NO clichés, NO meta-language about ' +
+      'panels, pages, or cameras. This is the STORY itself. Return ONLY the prose paragraph — no heading, no label, ' +
+      'no quotation marks.';
+    const stateBlock =
+      '\n\nSCENE CONTINUITY (obey exactly):\n' +
+      `- LOCATION: ${entry.location || summary}\n` +
+      (entry.time ? `- TIME: ${entry.time}\n` : '') +
+      (entry.present.length ? `- ON STAGE (only these characters): ${entry.present.join(', ')}\n` : '') +
+      (entry.knowledge ? `- HOW WE GOT HERE (carry this forward — do not restart elsewhere): ${entry.knowledge}\n` : '');
+    const user =
+      this.contextBlock(ctx) +
+      stateBlock +
+      (prevProse
+        ? `\n\nTHE PREVIOUS SCENE, in full (continue directly from it — same thread, its very next moment):\n${prevProse}`
+        : '') +
+      `\n\nTHIS SCENE (${pageIdx + 1} of ${total}) — its job: ${job}\nWhat happens: ${summary}` +
+      '\n\nWrite this scene as prose now.';
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.8, maxTokens: 700, signal },
+    );
+    return (raw ?? '').replace(/\s+/g, ' ').replace(/^["'“”\s]+|["'“”\s]+$/g, '').trim();
   }
 
   /**
@@ -868,14 +1024,17 @@ export class ComicAssistant {
   }
 
   /**
-   * Phase 2: write ONE page in two focused steps (same plan → expand pattern
-   * as characters, one level down):
-   *   2a. {@link planPage} — choose the layout and script the page: one action
-   *       micro-beat + one dialogue line per panel. Dialogue is planned page-wide
-   *       so the conversation alternates properly.
-   *   2b. {@link describePanel} — ONE call PER PANEL that turns its micro-beat
-   *       into the final self-contained art brief. A small model writing one
-   *       frame at a time is far sharper than one writing six at once.
+   * Phase 2: write ONE page as a COMIC (pictures do the storytelling) in three
+   * focused steps — each a smaller, sharper prompt than one monolith:
+   *   2a. {@link stageScene} — the VISUAL DIRECTOR. Adapts the prose into a shot
+   *       list: the layout and, per panel, the frozen MOMENT, what the picture
+   *       must CONVEY, and the STAGING that makes the image carry it. This is what
+   *       turns "illustrated prose" into a comic.
+   *   2b. {@link planPage} — the LETTERER. Serves that shot list with only the
+   *       words the page needs: gap-filler captions and real dialogue (never a
+   *       retelling of the picture).
+   *   2c. {@link describePanel} — ONE call PER PANEL that turns the staged beat
+   *       into the final art brief, aimed at making the picture CONVEY its point.
    */
   async writePage(
     ctx: StoryContext,
@@ -883,12 +1042,13 @@ export class ComicAssistant {
     pageIdx: number,
     memory: StoryboardMemory,
     entry: ContinuityState,
+    prose: string,
     signal?: AbortSignal,
   ): Promise<SuggestedPage> {
     const summary = beats[pageIdx]?.summary ?? '';
     // The cast this page is meant to feature — used as the "who's in frame"
-    // fallback when a panel beat names nobody, so unnamed panels stop defaulting
-    // to the whole ensemble.
+    // fallback when a panel names nobody, so unnamed panels stop defaulting to
+    // the whole ensemble.
     const assigned = beats[pageIdx]?.characters ?? [];
     const pageCast = ctx.characters.filter(
       (c) => c.name?.trim() && c.appearance?.trim() && assigned.some((n) => nameInText(n, c.name ?? '') || nameInText(c.name ?? '', n)),
@@ -899,156 +1059,146 @@ export class ComicAssistant {
     const newcomers = pageCastNames.filter(
       (n) => !memory.introduced.some((s) => s.toLowerCase() === n.toLowerCase()),
     );
-    const plan = await this.planPage(ctx, beats, pageIdx, memory, newcomers, entry, signal);
-    // Mark them met, so later pages don't re-introduce them.
+    // 2a. Stage the page visually — the shot list that tells the story in pictures.
+    const staged = await this.stageScene(ctx, beats, pageIdx, memory, newcomers, entry, prose, signal);
+    // The characters making their FIRST appearance here, with their traits — the
+    // letterer introduces WHO they are (a comic character-intro caption) so a new
+    // face is never a nameless stranger.
+    const newcomerInfo = newcomers.map((n) => ({
+      name: n,
+      traits: (ctx.characters.find((c) => (c.name ?? '').trim() === n)?.traits ?? '').trim(),
+    }));
+    // Mark newcomers met, so later pages don't re-introduce them.
     for (const n of newcomers) memory.introduced.push(n);
-    const want = panelCountFor(plan.layout);
+    // 2b. Letter it — captions + dialogue that SERVE the staged shots.
+    const words = await this.planPage(ctx, staged.panels, summary, prose, memory, {
+      isFirstPage: pageIdx === 0,
+      newcomers: newcomerInfo,
+    }, signal);
+    const want = panelCountFor(staged.layout);
     const panels: SuggestedPanel[] = [];
-    // Each panel also sees the one drawn just before it, so the camera varies.
-    let prevImage = memory.lastImage;
+    // The within-page continuity chain: each panel continues the SET and positions
+    // of the one drawn just before it. It starts EMPTY — panel 1 opens the scene's
+    // set fresh (the previous page is a different scene, so it must NOT carry that
+    // page's final image forward as "same space").
+    let prevImage = '';
     for (let j = 0; j < want; j++) {
-      const slot = plan.panels[j] ?? { beat: summary, dialogue: '', dialogueKind: 'speech' as BubbleKind, narration: '', speaker: '' };
-      const description = (await this.describePanel(ctx, summary, slot, j, want, prevImage, pageCast, entry, signal)) || slot.beat || summary;
+      const shot = staged.panels[j] ?? { moment: summary, conveys: summary, staging: '' };
+      const w = words[j] ?? { narration: '', speaker: '', dialogue: '', dialogueKind: 'speech' as BubbleKind };
+      const slot: PanelPlanSlot = { ...shot, ...w };
+      const description = (await this.describePanel(ctx, summary, slot, j, want, prevImage, pageCast, entry, prose, staged.stage, signal)) || shot.moment || summary;
       prevImage = description;
       panels.push({
         description,
-        dialogue: slot.dialogue,
-        dialogueKind: slot.dialogueKind,
-        narration: slot.narration,
-        speaker: slot.speaker,
+        dialogue: w.dialogue,
+        dialogueKind: w.dialogueKind,
+        narration: w.narration,
+        speaker: w.speaker,
+        staging: shot.staging,
       });
     }
-    return { layout: plan.layout, panels };
+    return { layout: staged.layout, panels };
   }
 
   /**
-   * Phase 2a: script ONE page — pick the layout and write each panel's action
-   * micro-beat and dialogue line. This call is small on purpose: no visual
-   * detail yet, just WHAT happens and WHO says what, informed by everything
-   * already written (so nothing repeats).
+   * Phase 2a: the VISUAL DIRECTOR — adapt this scene's prose into a comic SHOT
+   * LIST. This is the fix for "illustrated prose": instead of captioning one
+   * sentence per panel and drawing it literally, it decides how to TELL THE STORY
+   * IN PICTURES. It picks the layout and, per panel, the frozen MOMENT, the one
+   * thing the image must CONVEY on its own, and the STAGING (shot + framing + what
+   * shares the frame) that makes the picture carry it. Words come later.
    */
-  private async planPage(
+  private async stageScene(
     ctx: StoryContext,
     beats: PageBeat[],
     pageIdx: number,
     memory: StoryboardMemory,
     newcomers: string[],
     entry: ContinuityState,
+    prose: string,
     signal?: AbortSignal,
-  ): Promise<{ layout: LayoutId; panels: PanelPlanSlot[] }> {
+  ): Promise<{ layout: LayoutId; stage: string; panels: StagedPanel[] }> {
     const total = beats.length;
     const index = pageIdx + 1;
     const summary = beats[pageIdx]?.summary ?? '';
     const pageCharacters = beats[pageIdx]?.characters ?? [];
-    const outline = beats
-      .map((b, i) => `${i + 1}. ${b.summary}${i === pageIdx ? '   ← THIS PAGE' : ''}`)
-      .join('\n');
     const system =
-      'You are a comic book writer scripting ONE page of a longer story. It must ADVANCE the story: depict THIS ' +
-      'page\'s beat as the NEXT moment in the same unfolding events — never a redraw or re-staging of anything ' +
-      'already shown.\n' +
-      'HARD RULE — CONTINUITY (this is what makes it a STORY, not a slideshow): unless this is page 1, this page ' +
-      'is the DIRECT CONSEQUENCE of the page before it. Carry the SAME characters and the SAME unresolved ' +
-      'situation forward, and show what happens NEXT because of it. A reader must be able to follow, with zero ' +
-      'confusion, WHY the story moved from the previous page to this one. NEVER open an unrelated scene, and never ' +
-      'abandon the thread you were handed — pick it up and push it forward.\n' +
-      'HARD RULE — ONE SCENE PER PAGE: every panel on this page happens in the SAME location within the same ' +
-      'continuous moment. Never cut to a different place, a different time, or a parallel group of characters ' +
-      'mid-page. If the beat implies travel or several places, show only the destination — the most dramatic one.\n' +
-      'HARD RULE — INTRODUCE NEWCOMERS: if this page brings in a character the reader has NOT met yet (see NEW ON ' +
-      'THIS PAGE below), you must INTRODUCE them, not spring them. Show HOW they enter and make clear WHO they are ' +
-      'and their relationship to the others — through the action, the narration caption, and their first line. A ' +
-      'stranger must never simply appear already hugging or talking to the protagonist with no setup; the reader ' +
-      'should never think "who is this?".\n' +
-      'CAPTION THE SCENE: panel 1 of this page must carry a NARRATION caption (the "narration" field) that sets up ' +
-      'the scene in one vivid sentence — where and when we are, and what is at stake in this moment. This is the ' +
-      'premise the reader needs to understand the page; write it with care, like the opening line of a comic page. ' +
-      'If this page is a jump in place or time from the one before, that same panel-1 caption also names the new ' +
-      'place/time and MUST be motivated by what just happened (a jump with no cause is forbidden). Add a short ' +
-      'narration caption on a later panel too ONLY when the picture and dialogue cannot convey something essential ' +
-      '(a passage of time, an unseen consequence, an inner realisation). Otherwise leave "narration" as "".\n' +
-      'OPENING / ESTABLISHING SHOT: a page that opens on a NEW place must BEGIN with an ESTABLISHING SHOT — panel 1 ' +
-      'is a WIDE or high/aerial view of the location ITSELF (the landscape, the exterior, the skyline, the room) at ' +
-      'its time of day, so the reader feels WHERE and WHEN we are before anyone speaks, exactly like a film\'s opening ' +
-      'shot. That first panel carries only the scene\'s narration caption and NO dialogue (leave "speaker" and ' +
-      '"dialogue" ""), and its "beat" names NO character — it is the empty place. This is ALWAYS required for page 1 ' +
-      '(the whole book\'s opening) and for any page that moves to a new location. NEVER open such a page on a tight ' +
-      'close-up of characters already mid-conversation — earn the dialogue by showing the world first.\n' +
-      'FIRST choose the panel layout that fits this moment:\n' +
-      '- splash = one big dramatic full-page panel (a reveal, a huge emotional beat)\n' +
-      '- strip3 = 3 stacked panels (steady beats, a short exchange)\n' +
-      '- grid4 = 4 panels in a 2x2 (back-and-forth, a small montage)\n' +
-      '- feature3 = 1 large panel + 2 small (a hero moment plus two reactions)\n' +
-      '- six = 6 panels (fast, busy action)\n' +
-      'Vary the book\'s rhythm: do NOT choose the same layout as the previous page (see LAYOUTS ALREADY USED) ' +
-      'unless this moment truly demands it.\n' +
-      'THEN write one entry per panel:\n' +
-      '- "beat": ONE concrete sentence of what visibly HAPPENS in that panel — the action and who is in frame ' +
-      '(name them). CAST LOCK: you may ONLY name characters from the story\'s defined cast (listed in CHARACTERS). ' +
-      'NEVER introduce a new named person, and never add an unnamed stranger (a guard, a servant, a crowd) — if the ' +
-      'action seems to need someone else, use an existing cast member or stage it without them. ' +
-      'Every panel must show a DIFFERENT action; the page must move from its first panel to its last. ' +
-      'Do NOT put every character in every panel — cut like a film editor: a close-up on one face, an insert of ' +
-      'hands or an object, a two-shot, and only occasionally the full group.\n' +
-      '- "narration": the caption box for this panel (see CAPTION THE SCENE above). Panel 1 always has one; other ' +
-      'panels usually leave it "". It is NOT dialogue — it is the narrator\'s voice.\n' +
-      '- "speaker": the EXACT cast name of the character who says/thinks "dialogue", so it is always clear WHO is ' +
-      'talking. Leave "" when the panel is silent or has only narration.\n' +
-      '- "dialogue": the one line THAT speaker says or thinks, 12 words or fewer. It must sound like a REAL PERSON ' +
-      'reacting to THIS exact moment and to the line just before it, and fit who they are and who they are talking ' +
-      'to. FORBIDDEN: witty one-liners, puns, aphorisms, or clever quips dropped in for flavour (e.g. "Numbers are ' +
-      'like bad dates" — a real friend does not talk like a stand-up comedian). The exchange across the page must ' +
-      'read as ONE connected conversation where each line answers the last. Words only: NEVER put the speaker name ' +
-      'or a "Name:" label inside the dialogue, never two characters\' words in one panel, no stage directions, no ' +
-      'parentheses () or brackets []. Leave "" ONLY for a deliberate silent beat. ' +
-      'NEVER reuse a line from LINES ALREADY SPOKEN — every line in the book is said exactly once.\n' +
-      '- "dialogueKind": "speech" = said aloud; "thought" = private inner thought. (Scene captions go in ' +
-      '"narration", not here.) Use "speech" when dialogue is "".\n' +
-      'The number of panels MUST match the layout (splash=1, strip3=3, grid4=4, feature3=3, six=6). ' +
-      'Return ONLY {"layout":"","panels":[{"beat":"","narration":"","speaker":"","dialogue":"","dialogueKind":"speech"}]}.';
-    // The concrete, pre-computed continuity for THIS scene — the authority the
-    // whole page obeys. It replaces guesswork about where/when/who with fixed
-    // facts, so the script cannot wander out of the scene or jump ahead of it.
+      'You are a comics artist adapting a written scene into a VISUAL comic page. Your job is to TELL THIS STORY IN ' +
+      'PICTURES so a reader understands it from the ART, before reading a single word.\n' +
+      'ONE CONTINUOUS SEQUENCE IN ONE SET (this is what makes the images read as a STORY and not scattered ' +
+      'pictures — get this right above all else):\n' +
+      '- FIRST fix the "stage": the single physical space this whole page happens in, described concretely — its ' +
+      'key features and WHERE EACH ONE SITS (e.g. "the vault door on the left wall, the spiral stairwell down the ' +
+      'centre, the guard\'s console by the right window"), plus where the characters START. Every panel is drawn ' +
+      'INSIDE this same set with those features in the SAME places, so the reader is never disoriented.\n' +
+      '- THEN make the panels FLOW: each panel is the NEXT INSTANT in that space — one continuous action broken ' +
+      'into beats — so the reader\'s eye travels from frame to frame and can follow WHAT LEADS TO WHAT. Between ' +
+      'panels, keep the characters roughly where they were and the space unchanged; move only the CAMERA. Never cut ' +
+      'to a disconnected view that makes the reader lose the thread.\n' +
+      'THINK IN VISUAL BEATS, NOT SENTENCES: do NOT put one prose sentence in each panel. Choose the few MOMENTS ' +
+      'whose PICTURE carries the story — the setup, the turn, and the PAYOFF. NEVER drop the scene\'s climax to ' +
+      'illustrate the setup twice, and never draw the same moment in two panels.\n' +
+      'SHOW THE SCENE, NOT A LINEUP (most important): show the characters TOGETHER, interacting in the scene\'s ' +
+      'shared action, and INCLUDE the central shared moment the prose is about (e.g. the crew huddled over the ' +
+      'holo-map plotting). Do NOT give each character a solo panel — a page of one-per-panel portraits is a lineup, ' +
+      'not a story; use a solo close-up only for a real beat. BUT "together" means the characters who are ACTUALLY ' +
+      'in the scene together: a character the prose shows WATCHING from a distance, hidden, or PURSUING the others ' +
+      '(a detective tailing them) is NOT part of the group — stage them SEPARATE, in the background or at a ' +
+      'distance, never shoulder-to-shoulder or interacting with them.\n' +
+      'MAKE THE IMAGE DO THE WORK — for each panel decide three things:\n' +
+      '- "moment": the exact instant to FREEZE (the peak of the action, caught mid-motion), a beat LATER than the ' +
+      'previous panel.\n' +
+      '- "conveys": the ONE story point the reader must GRASP from this picture alone — a fact, a cause, a ' +
+      'relationship, or an irony. This is the panel\'s reason to exist.\n' +
+      '- "staging": the shot (close-up / medium / wide / over-the-shoulder / low / high / aerial) and the framing, ' +
+      'placing the camera WITHIN THE SET — note where the framed people and features sit relative to the set, so ' +
+      'the space stays consistent frame to frame. Put in one frame WHAT PROVES "conveys": stage CAUSE AND EFFECT ' +
+      'together (the scooter SLAMMING into the panel as it springs open — not a scooter idling in a hallway) and ' +
+      'DRAMATIC IRONY together (the thieves slipping past BELOW the guard who looks the wrong way). Vary the shot ' +
+      'from the previous panel for rhythm, but keep the SAME set and positions.\n' +
+      'HARD RULES: (1) ONE place, one continuous moment for the whole page — the fixed LOCATION below; never cut to ' +
+      'another place or time. (2) CAST LOCK: show ONLY the story\'s defined characters — NEVER invent a stranger, ' +
+      'guard, servant, or background crowd. (3) each character in CHARACTERS ON THIS PAGE must appear — but satisfy ' +
+      'this by putting them IN FRAME TOGETHER in the shared-action panels, NOT by giving each a panel of their own; ' +
+      'introduce a NEWCOMER by STAGING their entrance INTO the group (how they come into the scene), not springing ' +
+      'them fully arrived. (4) unless this is page 1, this page is the DIRECT CONSEQUENCE of the one before it — ' +
+      'continue the same thread, do not restart.\n' +
+      'FIRST pick the layout that fits the NUMBER of visual beats you need (MAX 4 panels — captions and dialogue ' +
+      'need room, so never cram more): splash = 1 big dramatic panel; strip3 = 3 stacked; grid4 = 4 in a 2x2; ' +
+      'feature3 = 1 large + 2 small. Vary it from the previous page (see LAYOUTS ALREADY USED). The panel count ' +
+      'MUST match the layout (splash=1, strip3=3, grid4=4, feature3=3).\n' +
+      'Keep "stage", and each panel\'s "moment", "conveys" and "staging", SHORT — a phrase or one line each, not a ' +
+      'paragraph (the art writer expands them later). Brevity keeps your output valid.\n' +
+      'Return ONLY {"layout":"","stage":"","panels":[{"moment":"","conveys":"","staging":""}]}.';
     const stateBlock =
-      '\n\nSCENE CONTINUITY (fixed for this page — obey it exactly; do NOT relocate or re-time any panel):\n' +
+      '\n\nSCENE CONTINUITY (fixed — every panel obeys this; do NOT relocate or re-time any panel):\n' +
       `- LOCATION (every panel is set HERE): ${entry.location || summary}\n` +
       (entry.time ? `- TIME: ${entry.time}\n` : '') +
       (entry.present.length ? `- ON STAGE (only these characters are physically here): ${entry.present.join(', ')}\n` : '') +
       (entry.knowledge
-        ? `- HOW WE ARRIVED HERE (this page is the direct consequence of this — carry it forward, do not restart elsewhere): ${entry.knowledge}\n`
-        : '') +
-      'Panel 1\'s narration caption should establish this location and time. Every panel stays in this one place.';
+        ? `- HOW WE ARRIVED HERE (this page is the direct consequence of this): ${entry.knowledge}\n`
+        : '');
     const user =
       this.contextBlock(ctx) +
-      `\n\nFULL STORY OUTLINE (all ${total} pages, in order):\n${outline}` +
       stateBlock +
+      (prose
+        ? '\n\nSCENE, WRITTEN OUT (this is exactly what happens — adapt THIS into visual beats; show its turn and ' +
+          `its payoff, and add nothing that is not in it):\n${prose}`
+        : `\n\nTHIS SCENE: ${summary}`) +
       (memory.layouts.length
         ? `\n\nLAYOUTS ALREADY USED (pages 1–${memory.layouts.length}, in order): ${memory.layouts.join(', ')}`
         : '') +
-      (memory.prevSummary
-        ? `\n\nTHE PAGE BEFORE THIS ONE (page ${index - 1}) showed: ${memory.prevSummary}\n` +
-          'THIS page picks up directly from it — the same thread, its very next moment or its consequence. ' +
-          'Continue that story; do NOT restart with an unconnected scene.'
-        : '') +
       (memory.lastImage
         ? `\n\nThe previous page's final image was:\n${memory.lastImage}\n` +
-          'Start the story from here and move it FORWARD — show what happens next (do not redraw this exact shot), ' +
-          'while staying inside the same continuous story.'
-        : '') +
-      (memory.lines.length
-        ? `\n\nLINES ALREADY SPOKEN (never repeat any of these):\n${memory.lines
-            .slice(-30)
-            .map((l) => `- ${l}`)
-            .join('\n')}`
+          'Move the story FORWARD from here — do not redraw this exact shot.'
         : '') +
       (pageCharacters.length
-        ? `\n\nCHARACTERS ON THIS PAGE — you MUST name EACH of these in at least one panel's "beat": ${pageCharacters.join(', ')}`
+        ? `\n\nCHARACTERS ON THIS PAGE — each must appear in at least one panel: ${pageCharacters.join(', ')}`
         : '') +
       (newcomers.length
         ? `\n\nNEW ON THIS PAGE — the reader has NOT met ${
             newcomers.length === 1 ? 'this character' : 'these characters'
-          } yet. INTRODUCE them here (show their entrance, who they are, and their relationship to the others) — do ` +
-          `not have them appear already mid-conversation or mid-hug with no setup:\n${newcomers
+          } yet; STAGE their entrance:\n${newcomers
             .map((n) => {
               const c = ctx.characters.find((x) => (x.name ?? '').trim() === n);
               return `- ${n}${c?.traits?.trim() ? ` — ${c.traits.trim()}` : ''}`;
@@ -1056,22 +1206,23 @@ export class ComicAssistant {
             .join('\n')}`
         : '') +
       (index === 1
-        ? '\n\nTHIS IS PAGE 1 — THE OPENING OF THE WHOLE COMIC. Do NOT start on characters talking. Panel 1 MUST be a ' +
-          'wide establishing shot of the setting (the place itself at its time of day — a vista, an exterior, an ' +
-          'aerial view), with a narration caption and no dialogue, like a film\'s opening shot. Then use the later ' +
-          'panels to introduce the protagonist inside that world. Prefer a multi-panel layout (not a single splash) ' +
-          'so there is room for both the establishing shot and the introduction.'
+        ? '\n\nTHIS IS PAGE 1 — THE OPENING. Panel 1 MUST be a WIDE ESTABLISHING shot of the place itself at its ' +
+          'time of day (empty of people), so the reader feels WHERE and WHEN we are; then introduce the ' +
+          'protagonist in the later panels. Prefer a multi-panel layout, not a single splash.'
         : '') +
-      `\n\nWrite ONLY page ${index} of ${total} — its beat: ${summary}\nScript this page as JSON.`;
+      `\n\nStage page ${index} of ${total} as JSON.`;
     const raw = await this.ai.chat(
       [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      { temperature: 0.75, maxTokens: 1000, schema: PAGE_PLAN_SCHEMA, signal },
+      { temperature: 0.7, maxTokens: 1500, schema: STAGE_SCENE_SCHEMA, signal },
     );
     const parsed = parseJsonObject(raw);
     let layout = validLayout(parsed?.layout);
+    // Backstop: never let a page be six tiny panels — there is no room for the art
+    // once it is lettered. Downgrade to the roomier 4-panel grid.
+    if (layout === 'six') layout = 'grid4';
     // Break a layout rut in code too: three identical layouts in a row gets
     // swapped to the same-panel-count sibling, so the plan's panels still fit.
     const [prev2, prev1] = memory.layouts.slice(-2);
@@ -1079,46 +1230,159 @@ export class ComicAssistant {
       if (layout === 'feature3') layout = 'strip3';
       else if (layout === 'strip3') layout = 'feature3';
     }
+    // The shared SET — the one physical space every panel is drawn inside. Fall
+    // back to the fixed location so the continuity anchor is never empty.
+    const stage = String(parsed?.stage ?? '').trim() || (entry.location || summary);
     const rawPanels = Array.isArray(parsed?.panels) ? parsed.panels : [];
-    const castNames = ctx.characters.map((c) => (c.name ?? '').trim()).filter(Boolean);
-    const panels: PanelPlanSlot[] = rawPanels
-      .map((p: any) => {
-        const dialogue = cleanDialogue(String(p?.dialogue ?? ''));
-        // Keep only a speaker that is actually in the cast (canonicalised).
-        const rawSpeaker = String(p?.speaker ?? '').trim();
-        const speaker = castNames.find((n) => nameInText(rawSpeaker, n) || nameInText(n, rawSpeaker)) ?? '';
-        const narration = String(p?.narration ?? '').trim();
-        return {
-          beat: String(p?.beat ?? '').trim(),
-          dialogue: DIALOGUE_JUNK.test(dialogue) ? '' : dialogue,
-          // A caption a hair short of "..." junk is dropped like dialogue junk.
-          narration: DIALOGUE_JUNK.test(narration) ? '' : narration,
-          speaker,
-          dialogueKind: validBubbleKind(p?.dialogueKind),
+    const panels: StagedPanel[] = rawPanels
+      .map((p: any) => ({
+        moment: String(p?.moment ?? '').trim(),
+        conveys: String(p?.conveys ?? '').trim(),
+        staging: String(p?.staging ?? '').trim(),
+      }))
+      .filter((p: StagedPanel) => p.moment.length > 0 || p.staging.length > 0);
+    // RESILIENCE: if the model returned no usable panels (a long prompt can make a
+    // small local model emit an empty/truncated "panels" array), synthesise a shot
+    // list from the prose so the letterer still runs — an empty staging must NEVER
+    // silently strip the page of narration and dialogue. Each sentence of the prose
+    // becomes a beat, padded to the layout's panel count.
+    if (!panels.length) {
+      const want = panelCountFor(layout);
+      const bits = (prose || summary)
+        .split(/(?<=[.!?])\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (let i = 0; i < want; i++) {
+        panels.push({ moment: bits[i] ?? bits[bits.length - 1] ?? summary, conveys: '', staging: '' });
+      }
+      // Page 1 must still OPEN on the place, not mid-action — keep the establishing
+      // shot even when the fallback fires, so the book has a proper starting frame.
+      if (index === 1 && panels.length) {
+        panels[0] = {
+          moment: `Wide establishing shot of ${entry.location || summary}${entry.time ? `, ${entry.time}` : ''} — the place itself, empty of people, setting where and when we are.`,
+          conveys: '',
+          staging: '',
         };
-      })
-      .filter((p: PanelPlanSlot) => p.beat.length > 0 || p.dialogue.length > 0 || p.narration.length > 0);
-    // Backstop the coverage guarantee: any character this page must feature but
-    // that the model failed to name gets written into a panel beat, so the art
-    // brief renders them (charactersNamedIn keys off the beat text). On page 1 the
-    // opening establishing panel (index 0) is meant to be the empty place — never
-    // inject a character into it, so the establishing shot stays peopleless.
+      }
+    }
+    // Backstop the coverage guarantee: any required character the director failed
+    // to place gets written into the shortest moment, so the art brief renders
+    // them. On page 1 the opening establishing panel (index 0) stays peopleless.
     const coverable = index === 1 && panels.length > 1 ? panels.slice(1) : panels;
     if (coverable.length) {
       for (const name of pageCharacters) {
-        if (panels.some((p) => nameInText(`${p.beat} ${p.dialogue}`, name))) continue;
-        const target = coverable.reduce((a, b) => (a.beat.length <= b.beat.length ? a : b));
-        target.beat = `${target.beat} ${name} is present in the frame.`.trim();
+        if (panels.some((p) => nameInText(`${p.moment} ${p.conveys} ${p.staging}`, name))) continue;
+        const target = coverable.reduce((a, b) => (a.moment.length <= b.moment.length ? a : b));
+        target.moment = `${target.moment} ${name} is present in the frame.`.trim();
       }
     }
-    return { layout, panels };
+    return { layout, stage, panels };
   }
 
   /**
-   * Phase 2b: the final art brief for EXACTLY ONE panel — the "one prompt per
-   * image" call. The model does one job: turn this panel's micro-beat into a
-   * vivid, self-contained snapshot an image generator can draw with no other
-   * context. Seeing the previous panel's brief forces camera variety.
+   * Phase 2b: the LETTERER — the WORDS for an already-staged page: the captions
+   * and the dialogue that make it read as a story. A comic with no words is not
+   * finished, so this actively writes narration and character dialogue (the comedy
+   * and the personalities live here) — while refusing hollow filler and lines that
+   * merely restate the picture. Returns one lettering entry per panel, in order.
+   */
+  private async planPage(
+    ctx: StoryContext,
+    staged: StagedPanel[],
+    summary: string,
+    prose: string,
+    memory: StoryboardMemory,
+    opts: { isFirstPage: boolean; newcomers: { name: string; traits: string }[] },
+    signal?: AbortSignal,
+  ): Promise<Array<{ narration: string; speaker: string; dialogue: string; dialogueKind: BubbleKind }>> {
+    const shots = staged
+      .map((p, i) => `Panel ${i + 1} — shows: ${p.moment || summary}${p.conveys ? ` | must convey: ${p.conveys}` : ''}`)
+      .join('\n');
+    const castNames = ctx.characters.map((c) => (c.name ?? '').trim()).filter(Boolean);
+    const system =
+      'You are the LETTERER for a comic page whose pictures are already staged. For each panel you are told what it ' +
+      'SHOWS. Add the WORDS that make the page read as a story — captions and dialogue. A comic with no words is ' +
+      'NOT finished: most panels that have people in them carry EITHER a caption OR a spoken line — rarely both, ' +
+      'since a long caption AND a bubble crowd out the art (a nearly silent page is also a FAILURE).\n' +
+      'KEEP EVERY CAPTION SHORT — a phrase or ONE sentence, never a paragraph; it shares the small panel with the ' +
+      'picture. NARRATION (captions): give panel 1 of the page a short caption that sets the scene. Use a later ' +
+      'caption to carry the story between images — a beat the picture cannot show, a turn, a passage of time, a ' +
+      'touch of wit, or to INTRODUCE a new character (see NEW CHARACTERS below). Do NOT merely restate what the ' +
+      'picture already shows (no "He slips on the wet floor" under a picture of him slipping).\n' +
+      'DIALOGUE — LET THE CHARACTERS TALK: write short, natural, IN-CHARACTER lines that fit the moment — banter, ' +
+      'reactions, plans, panic, arguments. This is where the comedy and the personalities live, so give people ' +
+      'something to say on most panels they appear in. Base each line on what is happening and how THAT character ' +
+      '(see their traits) would say it. FORBIDDEN: hollow filler ("What the—!"), lines that just narrate the ' +
+      'picture ("The door is closing!"), and puns or stand-up quips. When several characters share the page, make ' +
+      'it a real back-and-forth where each line answers the last.\n' +
+      'WHO IS BEING SPOKEN TO: a line is aimed at whoever shares the action with the speaker. NEVER address a ' +
+      'character who is only watching from a distance, hidden, or is the group\'s pursuer/adversary — the crew do ' +
+      'NOT chat or banter with the detective hunting them (read the traits to see who is on which side). Do NOT ' +
+      'drop another character\'s NAME into a line unless it truly matters — real people rarely say each other\'s ' +
+      'names.\n' +
+      '- "speaker": the EXACT cast name of who says/thinks the line; "" only on a genuinely silent panel.\n' +
+      '- "dialogueKind": "speech" = aloud, "thought" = inner. Use "speech" when "dialogue" is "".\n' +
+      'Words only: never put a "Name:" label inside dialogue, never two speakers in one panel, no parentheses or ' +
+      'brackets. NEVER reuse a line from LINES ALREADY SPOKEN. Return ONLY ' +
+      '{"panels":[{"narration":"","speaker":"","dialogue":"","dialogueKind":"speech"}]} with exactly one entry per ' +
+      'panel listed below, in order.';
+    const user =
+      (castNames.length ? `CAST (only these may speak — match each line to their voice):\n${ctx.characters
+        .filter((c) => c.name?.trim())
+        .map((c) => `- ${c.name!.trim()}${c.traits?.trim() ? `: ${c.traits.trim()}` : ''}`)
+        .join('\n')}\n` : '') +
+      (prose
+        ? `\nSCENE, WRITTEN OUT (base the words on what happens and what each character would say here):\n${prose}\n`
+        : `\nSCENE: ${summary}\n`) +
+      `\nTHE STAGED PANELS (letter each, in order):\n${shots}` +
+      (opts.isFirstPage
+        ? '\n\nTHIS IS THE OPENING OF THE COMIC: panel 1\'s caption must HOOK the reader and frame the premise in one ' +
+          'short line — the world, who these people are, and what they are after, like the opening line of a comic ' +
+          '(e.g. "In Neo-Tokyo, three of the worst thieves alive dream of one big score"). Not just the weather.'
+        : '') +
+      (opts.newcomers.length
+        ? `\n\nNEW CHARACTERS — first seen on THIS page. On the panel where each first clearly appears, add a SHORT ` +
+          `caption that introduces WHO they are: their name plus a characterising phrase from their traits, so the ` +
+          `reader knows them at a glance (e.g. "CLUMSY — self-appointed mastermind, mostly chaos"):\n${opts.newcomers
+            .map((n) => `- ${n.name}${n.traits ? `: ${n.traits}` : ''}`)
+            .join('\n')}`
+        : '') +
+      (memory.lines.length
+        ? `\n\nLINES ALREADY SPOKEN (never repeat any):\n${memory.lines.slice(-14).map((l) => `- ${l}`).join('\n')}`
+        : '') +
+      '\n\nLetter these panels as JSON.';
+    const raw = await this.ai.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.7, maxTokens: 900, schema: PAGE_PLAN_SCHEMA, signal },
+    );
+    const parsed = parseJsonObject(raw);
+    const rawPanels = Array.isArray(parsed?.panels) ? parsed.panels : [];
+    // Align one lettering entry to each staged panel; a missing entry is silent.
+    return staged.map((_, i) => {
+      const p = rawPanels[i] ?? {};
+      const dialogue = cleanDialogue(String(p?.dialogue ?? ''));
+      const rawSpeaker = String(p?.speaker ?? '').trim();
+      const speaker = castNames.find((n) => nameInText(rawSpeaker, n) || nameInText(n, rawSpeaker)) ?? '';
+      const narration = String(p?.narration ?? '').trim();
+      return {
+        narration: DIALOGUE_JUNK.test(narration) ? '' : narration,
+        speaker,
+        dialogue: DIALOGUE_JUNK.test(dialogue) ? '' : dialogue,
+        dialogueKind: validBubbleKind(p?.dialogueKind),
+      };
+    });
+  }
+
+  /**
+   * Phase 2c: the final art brief for EXACTLY ONE panel — the "one prompt per
+   * image" call. The model does one job: turn this panel's staged beat into a
+   * vivid snapshot an image generator can draw, composed so the picture CONVEYS
+   * the beat's story point AND continues the previous panel — same SET, same
+   * positions, the very next instant — so the page reads as one connected
+   * sequence rather than scattered illustrations.
    */
   private async describePanel(
     ctx: StoryContext,
@@ -1129,17 +1393,26 @@ export class ComicAssistant {
     prevImage: string,
     pageCast: StoryContext['characters'],
     entry: ContinuityState,
+    sceneProse: string,
+    stage: string,
     signal?: AbortSignal,
   ): Promise<string> {
     const system =
       'You are a comic artist writing the art brief for EXACTLY ONE panel. An image generator will draw this single ' +
-      'frame from your paragraph alone — it cannot see the story, the other panels, or any other context. Describe ' +
+      'frame from your paragraph alone — it cannot see the story, the other panels, or any other context. Your goal ' +
+      'is to make the PICTURE TELL THE STORY: compose the frame so a reader GRASPS what this panel must CONVEY ' +
+      '(given below) from the image alone, following the STAGING direction (the shot, the framing, and what is ' +
+      'placed in the frame together — e.g. cause and effect in one shot, or two characters positioned to show an ' +
+      'irony). Keep everything you describe literal and visible. Describe ' +
       'ONLY what the camera literally sees at this instant, like a photo caption, in present tense: the shot type ' +
       '(close-up / medium / wide / over-the-shoulder / bird\'s-eye / low angle), WHO is visible (name them) with ' +
       'their exact pose and facial expression, the action frozen mid-moment, the setting and background, and the ' +
       'time of day and lighting. One paragraph, 40–80 words. Never mention the plot, feelings, sound, the past or ' +
-      'future, or anything off-screen; never put written text, captions or speech inside the image. Choose a ' +
-      'DIFFERENT camera angle or distance than the previous panel so the page has visual rhythm. ' +
+      'future, or anything off-screen; never put written text, captions or speech inside the image.\n' +
+      'WRITE A SELF-CONTAINED BRIEF: the image generator draws THIS frame alone. Describe the set and the ' +
+      'characters\' positions concretely and fresh here, so it stays consistent with the rest of the page — but ' +
+      'NEVER refer to another panel: your paragraph must not contain "before", "previous", "still", "same as", ' +
+      '"unchanged", or "no new". Keep the room, objects and light consistent; change only the camera. ' +
       'Show ONLY the characters this panel\'s action names — do NOT add the rest of the cast to the frame, and NEVER ' +
       'invent any other person: no extra bystanders, guards, soldiers, servants, or background crowds may appear. ' +
       'If the panel names no character, show only the setting, empty of people. ' +
@@ -1148,7 +1421,7 @@ export class ComicAssistant {
     // it the whole cast every time is how every frame becomes the same group
     // shot. When the beat names nobody, fall back to THIS PAGE's cast (not the
     // whole book), so the frame stays focused on who the page is about.
-    const named = charactersNamedIn(ctx.characters, `${slot.beat} ${slot.dialogue}`);
+    const named = charactersNamedIn(ctx.characters, `${slot.moment} ${slot.conveys} ${slot.dialogue}`);
     const scope = named.length
       ? named
       : pageCast.length
@@ -1170,16 +1443,27 @@ export class ComicAssistant {
       (place
         ? `LOCATION (this panel is physically HERE — draw THIS place and no other; do not invent a different setting): ${place}${when ? ` — ${when}` : ''}\n\n`
         : '') +
+      (stage
+        ? `THE SET (the ONE physical space this whole page shares — draw these features in the SAME positions in ` +
+          `every panel so the reader stays oriented): ${stage}\n\n`
+        : '') +
       (cast ? `CHARACTERS (keep each looking exactly like this):\n${cast}\n\n` : '') +
       `SCENE (this page): ${pageSummary}\n` +
-      `THIS PANEL (${index + 1} of ${total}) SHOWS: ${slot.beat || pageSummary}\n` +
+      (sceneProse ? `WHAT IS HAPPENING (the full scene — draw a moment true to it): ${sceneProse}\n` : '') +
+      `THIS PANEL (${index + 1} of ${total}) FREEZES: ${slot.moment || pageSummary}\n` +
+      (slot.conveys ? `THE READER MUST UNDERSTAND FROM THIS PICTURE ALONE: ${slot.conveys}\n` : '') +
+      (slot.staging ? `STAGE IT LIKE THIS (shot, framing, what shares the frame): ${slot.staging}\n` : '') +
       (slot.dialogue
         ? `While this happens, ${slot.speaker?.trim() ? slot.speaker.trim() : 'a character'} is ` +
           `${slot.dialogueKind === 'thought' ? 'thinking' : 'saying'}: "${slot.dialogue}" — show it on ${
             slot.speaker?.trim() ? 'their' : 'the character\'s'
           } face and body language only; put NO text, letters, or speech bubbles in the image.\n`
         : '') +
-      (prevImage ? `\nPREVIOUS PANEL, for contrast — pick a different camera: ${prevImage}\n` : '') +
+      (prevImage
+        ? `\nPREVIOUS PANEL (REFERENCE ONLY — keep this frame's set, objects and character positions consistent ` +
+          `with it and show the very next instant, but do NOT mention or refer to it in your brief; describe THIS ` +
+          `frame from scratch): ${prevImage}\n`
+        : '') +
       '\nWrite the art brief for this one panel.';
     const raw = await this.ai.chat(
       [
@@ -1271,6 +1555,9 @@ export class ComicAssistant {
   /** Compact, readable summary of the story so far for prompting. */
   private contextBlock(ctx: StoryContext): string {
     const lines: string[] = [];
+    // The refined premise is the authoritative logline that drives generation; the
+    // raw idea is kept alongside it as the author's own-words seed.
+    if (ctx.premise?.trim()) lines.push(`PREMISE: ${ctx.premise.trim()}`);
     if (ctx.idea?.trim()) lines.push(`IDEA: ${ctx.idea.trim()}`);
     // The locked world — every step inherits it, so prose and art stay coherent.
     if (ctx.setting?.trim()) lines.push(`SETTING: ${ctx.setting.trim()}`);
@@ -1383,6 +1670,21 @@ function ensureCastAssigned(pages: PageBeat[], castNames: string[]): PageBeat[] 
   return pages;
 }
 
+/**
+ * A minimal one-panel page for when a scene's scripting call fails. It keeps the
+ * book complete (no missing page, no aborted run) and stays fully editable: the
+ * author can add art, dialogue and a better layout by hand. Uses the scene prose
+ * (or the beat summary) as the panel's description so it isn't blank.
+ */
+function fallbackPage(beat: PageBeat | undefined, prose: string): SuggestedPage {
+  const text = (prose || beat?.summary || '').trim();
+  return {
+    layout: 'splash',
+    panels: [{ description: text, dialogue: '', dialogueKind: 'speech', narration: '', speaker: '' }],
+    prose,
+  };
+}
+
 /** A blank continuity state — filled properly by the scene-state work later. */
 function emptyState(): ContinuityState {
   return { location: '', time: '', present: [], props: {}, mood: '', knowledge: '' };
@@ -1398,11 +1700,12 @@ function beatToScene(
   beat: PageBeat,
   page: SuggestedPage,
   state: { entry: ContinuityState; exit: ContinuityState },
+  prose: string,
 ): Scene {
   const sections: Section[] = page.panels.map((panel) => ({
     id: newId('section'),
     moment: aiField(panel.description ?? ''),
-    cameraHint: aiField(''),
+    cameraHint: aiField(panel.staging ?? ''),
     speaker: aiField(panel.speaker ?? ''),
     line: aiField(panel.dialogue ?? ''),
     dialogueKind: panel.dialogueKind ?? 'speech',
@@ -1411,6 +1714,7 @@ function beatToScene(
   }));
   return {
     id: newId('scene'),
+    prose: aiField(prose ?? ''),
     goal: aiField(beat?.summary ?? ''),
     conflict: aiField(''),
     turn: aiField(state.exit.knowledge ?? ''),
@@ -1442,6 +1746,9 @@ function assembleBible(ctx: StoryContext, spine: StorySpine, scenes: Scene[]): S
     createdAt: now,
     updatedAt: now,
     setup: {
+      // The author's own words (the raw idea) is the intake seed; the refined
+      // logline lives on the spine below. Both are recorded so the bible carries
+      // the full idea → premise provenance on its own (export/import fidelity).
       premise: userField(ctx.idea?.trim() ?? ''),
       characters: userField(roster),
       setting: userField(ctx.setting?.trim() ?? ''),
@@ -1450,7 +1757,9 @@ function assembleBible(ctx: StoryContext, spine: StorySpine, scenes: Scene[]): S
       storyline: userField(ctx.synopsis?.trim() ?? ''),
     },
     spine: {
-      logline: aiField(ctx.idea?.trim() ?? ''),
+      // The refined premise IS the logline; fall back to the raw idea if the
+      // author never ran the refinement.
+      logline: ctx.premise?.trim() ? userField(ctx.premise.trim()) : aiField(ctx.idea?.trim() ?? ''),
       theme: emptyField(''),
       dramaticQuestion: aiField(spine.dramaticQuestion),
       climax: aiField(spine.climax),

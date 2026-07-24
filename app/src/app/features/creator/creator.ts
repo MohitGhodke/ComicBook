@@ -4,6 +4,7 @@ import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Reader } from '../reader/reader';
 import { PagePreview, BubbleRepositionEvent, TailRepositionEvent, CaptionRepositionEvent } from '../shared/page-preview';
 import { FontSizeSlider } from '../shared/font-size-slider';
+import { BookLoader } from '../shared/book-loader';
 import { ComicLibraryService } from '../../core/services/comic-library.service';
 import { StorageService } from '../../core/services/storage.service';
 import { PromptService } from '../../core/services/prompt.service';
@@ -32,7 +33,7 @@ interface StepDef {
 
 @Component({
   selector: 'app-creator',
-  imports: [FormsModule, RouterLink, Reader, PagePreview, FontSizeSlider],
+  imports: [FormsModule, RouterLink, Reader, PagePreview, FontSizeSlider, BookLoader],
   templateUrl: './creator.html',
   styleUrl: './creator.scss',
 })
@@ -128,6 +129,28 @@ export class Creator implements OnInit {
   readonly isLast = computed(() => this.step() === this.steps.length - 1);
   readonly isFirst = computed(() => this.step() === 0);
 
+  /** True while ANY on-device AI task is running — drives the persistent loader. */
+  readonly aiBusy = computed(() =>
+    this.ideaLoading() || this.charLoading() || this.beatsLoading() ||
+    this.storyLoading() || this.frontCoverLoading() || this.backCoverLoading(),
+  );
+
+  /** Caption under the persistent loader — the most specific thing in flight. */
+  readonly aiBusyLabel = computed(() => {
+    if (this.storyLoading()) {
+      const p = this.storyProgress();
+      return p ? `Writing page ${p.done} of ${p.total}…` : 'Outlining your story…';
+    }
+    if (this.charLoading()) {
+      const p = this.charProgress();
+      return p ? `Designing character ${p.done} of ${p.total}…` : 'Casting your characters…';
+    }
+    if (this.ideaLoading()) return 'Refining your idea…';
+    if (this.beatsLoading()) return 'Drafting the beats…';
+    if (this.frontCoverLoading() || this.backCoverLoading()) return 'Art-directing the cover…';
+    return 'Working…';
+  });
+
   async ngOnInit() {
     const paramId = this.route.snapshot.paramMap.get('bookId');
     if (paramId) {
@@ -156,6 +179,7 @@ export class Creator implements OnInit {
     this.draft = {
       title: book.title,
       idea: book.idea ?? '',
+      premise: book.premise ?? '',
       setting: book.setting ?? '',
       era: book.era ?? '',
       tone: book.tone ?? '',
@@ -196,6 +220,7 @@ export class Creator implements OnInit {
   private storyContext(): StoryContext {
     return {
       idea: this.draft.idea,
+      premise: this.draft.premise,
       characters: this.draft.characters.map((c) => ({ name: c.name, appearance: c.appearance, traits: c.traits })),
       synopsis: this.draft.synopsis,
       setting: this.draft.setting,
@@ -247,7 +272,9 @@ export class Creator implements OnInit {
   acceptIdea() {
     const s = this.ideaSuggestion();
     if (s) {
-      if (s.logline) this.draft.idea = s.logline;
+      // The refined logline goes to the SEPARATE premise field — the author's own
+      // words in `idea` are never overwritten.
+      if (s.logline) this.draft.premise = s.logline;
       if (s.title) this.draft.title = s.title;
       // World fields only fill in if the author left them blank — never overwrite what they wrote.
       if (!this.draft.setting.trim() && s.setting) this.draft.setting = s.setting;
@@ -357,6 +384,33 @@ export class Creator implements OnInit {
   }
   dismissStoryboard() { this.storySuggestions.set(null); }
 
+  /**
+   * Rebuild the editable pages from the persisted story (the bible) — WITHOUT
+   * re-running the model. The story is the durable source of truth; pages are a
+   * projection of it, so after "Delete all pages" (or any time the pages and the
+   * story drift apart) the author can re-derive every page from the saved scenes
+   * in one click. Appends to whatever pages already exist.
+   */
+  addPagesFromStory() {
+    const scenes = this.bible?.scenes ?? [];
+    if (!scenes.length) return;
+    const firstNew = this.draft.pages.length;
+    const created: Page[] = scenes.map((sc) => ({
+      id: newId('page'),
+      layout: sc.layout ?? this.defaultLayout,
+      panels: (sc.sections ?? []).map((s) => newPanel({
+        description: s.artPrompt?.value || s.moment?.value || '',
+        dialogue: cleanDialogue(s.line?.value || ''),
+        dialogueKind: s.dialogueKind || 'speech',
+        narration: s.narration?.value || '',
+        speaker: s.speaker?.value || '',
+      })),
+    }));
+    this.draft.pages = [...this.draft.pages, ...created]; // new array reference
+    this.pageIndex.set(firstNew); // jump to the first rebuilt page
+    this.persist();
+  }
+
   // Step 5 — Cover image prompt (front / back)
   readonly coverSides: CoverSide[] = ['front', 'back'];
   coverImg(side: CoverSide): string { return side === 'front' ? this.coverThumb : this.backThumb; }
@@ -403,6 +457,7 @@ export class Creator implements OnInit {
       id: this.bookId,
       title: this.draft.title.trim() || 'Untitled',
       idea: this.draft.idea.trim(),
+      premise: this.draft.premise.trim() || undefined,
       setting: this.draft.setting.trim() || undefined,
       era: this.draft.era.trim() || undefined,
       tone: this.draft.tone.trim() || undefined,
@@ -678,12 +733,80 @@ export class Creator implements OnInit {
     this.previewing.set(false);
   }
 
+  // ── "Read the full story" — the polished prose reading ───────────────────────
+  /** Whether the full-story reading overlay is open. */
+  readonly storyOpen = signal(false);
+
+  /**
+   * The generated story as readable prose, scene by scene — the "good story"
+   * layer surfaced for reading. Pulled from the persisted Bible when present
+   * (survives Add-to-pages and reloads), else from the freshly-streamed
+   * storyboard suggestions so it's available the moment generation finishes.
+   */
+  readonly fullStory = computed<{ label: string; prose: string }[]>(() => {
+    // Defensive throughout: this renders live off partially-generated data while
+    // the background task streams, so every field is treated as possibly missing.
+    const scenes = this.bible?.scenes ?? [];
+    if (scenes.length) {
+      return scenes
+        .map((s, i) => ({
+          label: (s?.entryState?.value?.location ?? '').trim() || `Scene ${i + 1}`,
+          prose: (s?.prose?.value ?? s?.goal?.value ?? '').trim(),
+        }))
+        .filter((p) => p.prose.length > 0);
+    }
+    return (this.storySuggestions() ?? [])
+      .map((p, i) => ({ label: `Scene ${i + 1}`, prose: (p?.prose ?? '').trim() }))
+      .filter((p) => p.prose.length > 0);
+  });
+
+  /** Show the "Read the full story" affordance only once there's prose to read. */
+  readonly hasFullStory = computed(() => this.fullStory().length > 0);
+
+  openStory() { if (this.hasFullStory()) this.storyOpen.set(true); }
+  closeStory() { this.storyOpen.set(false); }
+
+  /**
+   * Download the Story Bible as a JSON file — the FULL background source of truth
+   * the whole comic is generated from: premise → spine → scenes → sections
+   * (panels), each with its prose, continuity state, staging (cameraHint) and art
+   * prompt. This is the hierarchy tree; exporting it makes every level inspectable
+   * so we can see exactly where generation is going wrong. Falls back to the
+   * current draft + pages when a Bible hasn't been assembled yet, so the button
+   * never silently does nothing.
+   */
+  exportBible() {
+    const data = this.bible ?? {
+      note: 'No Story Bible assembled yet — exporting the current draft + pages instead.',
+      title: this.draft.title,
+      idea: this.draft.idea,
+      premise: this.draft.premise,
+      pages: this.buildChapter().pages,
+    };
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const slug =
+      (this.draft.title || 'comic')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'comic';
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${slug}-bible.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   private buildBookForPreview(): ComicBook {
     const chapter = this.buildChapter();
     return {
       id: 'preview',
       title: this.draft.title || 'Untitled',
       idea: this.draft.idea,
+      premise: this.draft.premise || undefined,
       author: this.draft.author,
       coverImageRef: this.draft.coverImageRef,
       backCoverImageRef: this.draft.backCoverImageRef,

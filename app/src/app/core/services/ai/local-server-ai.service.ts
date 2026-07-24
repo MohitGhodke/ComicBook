@@ -38,20 +38,38 @@ export class LocalServerAiService extends AiService {
   }
 
   async chat(messages: AiMessage[], opts: ChatOptions = {}): Promise<string> {
-    // Reasoning models spend an unpredictable share of the token budget
-    // "thinking" before the answer appears in `content`. If the budget runs
-    // out mid-reasoning, retry once with a much larger allowance instead of
-    // failing the caller's whole flow.
+    // One logical completion, including the "starved mid-reasoning" retry:
+    // reasoning models spend an unpredictable share of the token budget
+    // "thinking" before the answer appears in `content`; if the budget runs out
+    // mid-reasoning, retry once with a much larger allowance.
     const budget = opts.maxTokens ?? 400;
-    let out = await this.completeOnce(messages, opts, budget);
-    if (out === null) out = await this.completeOnce(messages, opts, budget * 4);
-    if (out === null) {
-      throw new Error(
-        'The model used all its tokens thinking, even after retrying with a larger budget. ' +
-          'Pick a smaller/non-reasoning model, or turn off thinking in your local server.',
-      );
+    const attempt = async (): Promise<string> => {
+      let out = await this.completeOnce(messages, opts, budget);
+      if (out === null) out = await this.completeOnce(messages, opts, budget * 4);
+      if (out === null) {
+        throw new Error(
+          'The model used all its tokens thinking, even after retrying with a larger budget. ' +
+            'Pick a smaller/non-reasoning model, or turn off thinking in your local server.',
+        );
+      }
+      return out;
+    };
+    // Transient server failures — a dropped connection, a 5xx, or LM Studio's
+    // intermittent gpt-oss "Channel Error" (a 400 from the model runtime) — are
+    // usually one-offs. Retry a couple of times with a short backoff so a single
+    // hiccup doesn't fail the caller's whole flow. A real cancel is never retried.
+    let lastErr: unknown;
+    for (let i = 0; i < 3; i++) {
+      if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      try {
+        return await attempt();
+      } catch (e: any) {
+        if (e?.name === 'AbortError' || opts.signal?.aborted) throw e;
+        lastErr = e;
+        await new Promise((r) => setTimeout(r, 350 * (i + 1)));
+      }
     }
-    return out;
+    throw lastErr instanceof Error ? lastErr : new Error('chat request failed');
   }
 
   /** One completion attempt. Returns null when the model starved mid-reasoning. */
@@ -79,7 +97,12 @@ export class LocalServerAiService extends AiService {
       body: JSON.stringify(body),
       signal: opts.signal,
     });
-    if (!res.ok) throw new Error(`chat request failed: ${res.status}`);
+    if (!res.ok) {
+      // Include the server's message (e.g. LM Studio's "Channel Error") so a
+      // genuine, non-transient failure is legible instead of a bare status code.
+      const detail = await res.text().catch(() => '');
+      throw new Error(`chat request failed: ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ''}`);
+    }
     const data = await res.json();
     const choice = data?.choices?.[0];
     const content = stripThinking(choice?.message?.content ?? '');

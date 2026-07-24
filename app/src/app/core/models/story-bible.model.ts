@@ -120,6 +120,13 @@ export interface Scene {
   id: string;
   /** Which spine setup/beat this scene delivers (for coverage checks). */
   mapsToSetup?: string;
+  /**
+   * The scene written as vivid narrative PROSE — the "good story" layer. Generated
+   * BEFORE the panels so the dialogue and art briefs are DERIVED from it (grounded
+   * in real narrative, not a one-line summary). Also what the "Read the full story"
+   * reading renders, woven scene by scene.
+   */
+  prose?: Authored<string>;
   goal: Authored<string>;
   conflict: Authored<string>;
   turn: Authored<string>;

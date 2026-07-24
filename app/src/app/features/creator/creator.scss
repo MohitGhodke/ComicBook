@@ -176,6 +176,7 @@
 
 /* ── Pages & panels ── */
 .pages-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 0.9rem; padding: 1.5rem 0; }
+.pages-empty-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 
 .layout-pick { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; color: var(--ink-soft); }
 .layout-pick.block { flex-direction: column; align-items: flex-start; gap: 0.35rem; }
@@ -274,6 +275,43 @@
 /* ── Preview overlay ── */
 .preview-overlay { position: fixed; inset: 0; z-index: 100; background: #fff; }
 .back-fab { position: fixed; top: 1rem; left: 1rem; z-index: 120; background: color-mix(in srgb, var(--card) 92%, transparent); box-shadow: var(--shadow); }
+
+/* ── Persistent AI loader — floats above everything while a task runs ── */
+.ai-floating-loader {
+  position: fixed; left: 50%; bottom: 1.1rem; transform: translateX(-50%); z-index: 140;
+  display: flex; align-items: center;
+  padding: 0.5rem 1rem;
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  border-radius: 999px; box-shadow: var(--shadow);
+  backdrop-filter: blur(4px);
+  animation: floating-loader-in 0.25s ease-out;
+}
+@keyframes floating-loader-in {
+  from { opacity: 0; transform: translate(-50%, 0.4rem); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* ── "Read the full story" overlay — an editorial prose reading ── */
+.story-overlay {
+  position: fixed; inset: 0; z-index: 100; background: #fff;
+  overflow-y: auto; padding: 4.5rem 1.5rem 5rem;
+}
+.story-read { max-width: 40rem; margin: 0 auto; }
+.story-read-eyebrow {
+  font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--accent); font-weight: 600;
+}
+.story-read-title { font-family: var(--font-display); font-size: 2rem; line-height: 1.15; margin: 0.4rem 0 0.8rem; }
+.story-read-premise {
+  font-family: var(--font-display); font-size: 1.05rem; line-height: 1.55;
+  color: var(--ink-soft); margin: 0 0 2rem; padding-bottom: 1.4rem; border-bottom: 1px solid var(--line);
+}
+.story-scene { margin: 0 0 1.8rem; }
+.story-scene-label {
+  display: block; font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-faint); margin-bottom: 0.35rem;
+}
+.story-scene-prose { margin: 0; font-size: 1.08rem; line-height: 1.7; color: var(--ink); }
 
 @media (max-width: 720px) {
   .creator { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }

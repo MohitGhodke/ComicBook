@@ -120,8 +120,10 @@ export interface Chapter {
 export interface ComicBook {
   id: string;
   title: string;
-  /** The core message / theme the book communicates. */
+  /** The core message / theme the book communicates — the author's own words. */
   idea: string;
+  /** The AI-refined premise / logline, kept separate so `idea` is never overwritten. */
+  premise?: string;
   /** The story's world / place — anchors both prose and art so they don't drift. */
   setting?: string;
   /** The time period / era. */
